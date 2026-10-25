@@ -102,7 +102,7 @@ export async function executeProcessRun(run: Run, segmentSeconds: number, signal
         const context = [
           total > 1 ? `This is part ${seg.index + 1} of ${total}, covering ${formatTime(seg.start)}–${formatTime(seg.end)} of the recording.` : '',
           transcript
-            ? `An automatic transcript of this audio, for reference (it may contain errors; trust what you hear):\n"""${transcript}"""\n\nDo not repeat the transcript.`
+            ? `An automatic transcript of this audio, for reference (it may contain errors; trust what you hear):\n"""${transcript}"""\n\nDo not repeat the transcript; give only your notes.`
             : 'Start with a verbatim transcript (including fillers), then your notes.',
           'Process the attached audio according to the instructions.',
         ]

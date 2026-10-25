@@ -452,8 +452,10 @@ describe('fixes from review', () => {
     // Combined without assistance: transcript collapsed, Inkling's notes shown, as before.
     expect(session.pipeline!.steps.map((x) => [x.kind, x.output, x.useTranscript ?? null])).toEqual([
       ['transcribe', 'collapse', null],
-      ['listen', 'show', true],
+      ['listen', 'show', false],
     ]);
+    // v1 → v2 → v4: the old language-practice text ends up as the current one.
+    expect(session.pipeline!.steps[1].instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
     db3.close();
   });
 });
@@ -520,5 +522,44 @@ describe('multi-step pipelines', () => {
     const runs = await settled(entry.turnId);
     expect(runs.map((r) => r.mode)).toEqual(['stt', 'cleanup']);
     expect(calls.length).toBe(2);
+  });
+});
+
+describe('listening writes its own transcript (v4)', () => {
+  it('migrates v3 pipelines: listen steps stop taking the transcript, old default texts are replaced', async () => {
+    const { default: Dexie } = await import('dexie');
+    const { OLD_PROCESSING_INSTRUCTIONS_V2, OLD_LANGUAGE_PRACTICE_V2 } = await import('./migrations');
+    const { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, defaultSettings } = await import('./defaults');
+    const { VoiceNotesDB } = await import('./db');
+    const name = `migrate-v4-${Math.random()}`;
+    const v3 = new Dexie(name);
+    v3.version(3).stores({ groups: 'id', sessions: 'id', settings: 'id' });
+    const listen = (instructions: string) => ({ id: 'l', kind: 'listen', model: INK, instructions, output: 'show', useTranscript: true });
+    await v3.table('settings').put({ ...defaultSettings(), instructions: { processing: OLD_PROCESSING_INSTRUCTIONS_V2, inference: '' } });
+    await v3.table('sessions').put({ id: 'a', instructions: {}, pipeline: { language: '', steps: [{ id: 't', kind: 'transcribe', model: WHISPER, instructions: '', output: 'show' }, listen(OLD_LANGUAGE_PRACTICE_V2)] } });
+    await v3.table('sessions').put({ id: 'b', instructions: {}, pipeline: { language: '', steps: [listen('My own focus')] } });
+    v3.close();
+    const db4 = new VoiceNotesDB(name);
+    expect((await db4.settings.get('global'))!.instructions.processing).toBe(DEFAULT_PROCESSING_INSTRUCTIONS);
+    const a = (await db4.sessions.get('a'))!.pipeline!.steps[1];
+    expect(a.useTranscript).toBe(false);
+    expect(a.instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
+    const b = (await db4.sessions.get('b'))!.pipeline!.steps[0];
+    expect(b.instructions).toBe('My own focus');
+    db4.close();
+  });
+
+  it('Transcribe + Inkling runs both independently; Inkling is asked for its own transcript', async () => {
+    const calls = mockOpenRouter((path) => (path === 'audio/transcriptions' ? json({ ...WHISPER_RESPONSE, text: '. Test 1, 2, 3.' }) : textStream('Test one, two, three.')));
+    const { entry } = await seedRecording();
+    await processRecording(entry.id, PIPELINE_PRESETS.find((p) => p.id === 'transcribe-inkling')!.config);
+    const runs = await settled(entry.turnId);
+    expect(runs.find((r) => r.mode === 'audio')!.dependsOn).toEqual([]);
+    const inkling = calls.find((c) => c.body.model === INK)!;
+    const sent = JSON.stringify(inkling.body.messages);
+    expect(sent).not.toContain('automatic transcript');
+    expect(sent).toContain('verbatim transcript');
+    const transcript = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(transcript.text).toBe('Test 1, 2, 3.');
   });
 });

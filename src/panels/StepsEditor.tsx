@@ -42,7 +42,7 @@ export function StepsEditor({ config, change, settings, extraListenField }: { co
         kind === 'transcribe'
           ? step('transcribe', { model: settings.sttOptions[0]?.id ?? STT_DEFAULT })
           : kind === 'listen'
-            ? step('listen', { model: settings.audioOptions[0]?.id ?? INKLING, useTranscript: c.steps.some((s) => s.kind === 'transcribe') })
+            ? step('listen', { model: settings.audioOptions[0]?.id ?? INKLING })
             : step('assist', { preset: settings.inferencePresets[0]?.id ?? 'cleanup' });
       // A new last step is what you most likely want to see; earlier steps fold away.
       return { ...c, steps: [...c.steps.map((s) => ({ ...s, output: 'collapse' as const })), { ...created, output: 'show' as const }] };
@@ -160,13 +160,13 @@ function StepCard({
             <ModelSelect label="Model" kind="chat" requireAudio value={s.model ?? ''} options={settings.audioOptions} onChange={(model) => onChange({ model })} />
             {hasTranscribeBefore(steps, index) ? (
               <Toggle
-                label="Give it the transcript too"
-                description="Helps with names and fast speech; it's told to trust what it hears."
+                label="Give it the earlier transcript"
+                description="Usually off: it writes its own transcript from what it hears. Turn on to help with names; it then gives only notes."
                 checked={!!s.useTranscript}
                 onChange={(useTranscript) => onChange({ useTranscript })}
               />
             ) : (
-              <p className="text-[13px] text-faint">With no Transcribe step before it, it writes its own transcript first.</p>
+              <p className="text-[13px] text-faint">It writes its own transcript from what it hears.</p>
             )}
             <Field label="What should it listen for?" hint="Added after the default, group and session instructions.">
               <textarea className={`${inputClass} min-h-20`} value={s.instructions} onChange={(e) => onChange({ instructions: e.target.value })} />

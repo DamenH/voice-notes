@@ -6,6 +6,7 @@ import { navigate } from '../app/router';
 import { useDesktop, useRecorder } from '../app/hooks';
 import { Icon } from '../ui/Icon';
 import { Button, IconButton, Menu, confirmAction } from '../ui/primitives';
+import { EditableTitle } from '../ui/EditableTitle';
 import { PipelineEditor } from '../panels/PipelineEditor';
 import { InstructionsEditor, VoiceEditor } from '../panels/Panels';
 import { useState } from 'react';
@@ -23,7 +24,7 @@ export async function quickSession(groupId?: string) {
   navigate({ name: 'session', sessionId: s.id });
 }
 
-function TopBar({ title, back, actions }: { title: string; back?: () => void; actions?: React.ReactNode }) {
+function TopBar({ title, back, actions, onRename }: { title: string; back?: () => void; actions?: React.ReactNode; onRename?: (t: string) => void }) {
   const desktop = useDesktop();
   return (
     <header
@@ -31,7 +32,13 @@ function TopBar({ title, back, actions }: { title: string; back?: () => void; ac
       style={desktop ? undefined : { paddingTop: 'var(--safe-top)' }}
     >
       {!desktop && back && <IconButton icon="back" label="Back" onClick={back} />}
-      <h1 className={`flex-1 truncate font-bold ${desktop ? 'text-2xl' : 'px-2 text-[17px]'}`}>{title}</h1>
+      {onRename ? (
+        <div className="min-w-0 flex-1">
+          <EditableTitle value={title} label="Group name" onSave={onRename} className={desktop ? 'text-2xl' : 'text-[17px]'} />
+        </div>
+      ) : (
+        <h1 className={`flex-1 truncate font-bold ${desktop ? 'text-2xl' : 'px-2 text-[17px]'}`}>{title}</h1>
+      )}
       {actions}
     </header>
   );
@@ -188,6 +195,7 @@ export function GroupPage({ groupId, settings }: { groupId: string; settings: Se
     <div className={desktop ? 'mx-auto max-w-3xl px-6 pb-10' : 'pb-28'}>
       <TopBar
         title={group.name}
+        onRename={(n) => void renameGroup(group.id, n)}
         back={() => navigate({ name: 'home' })}
         actions={
           <Menu

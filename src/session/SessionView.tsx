@@ -11,6 +11,7 @@ import { openPanel } from '../app/stores';
 import { useApiKey, useDesktop, useOnline } from '../app/hooks';
 import { Icon } from '../ui/Icon';
 import { IconButton, Menu, confirmAction, toast } from '../ui/primitives';
+import { EditableTitle } from '../ui/EditableTitle';
 import { Dock } from './Dock';
 import { Timeline, buildTurns } from './Timeline';
 
@@ -100,10 +101,10 @@ function SessionHeader({ session, group, settings }: { session: Session; group?:
   return (
     <header className="flex min-h-14 items-center gap-1">
       {!desktop && <IconButton icon="back" label="Back to group" onClick={() => navigate(group ? { name: 'group', groupId: group.id } : { name: 'home' })} />}
-      <div className="min-w-0 flex-1 px-1">
-        <h1 className="truncate text-[17px] font-bold desk:text-xl">{session.title}</h1>
+      <div className="min-w-0 flex-1">
+        <EditableTitle value={session.title} label="Session name" onSave={(t) => void renameSession(session.id, t)} className="text-[17px] desk:text-xl" />
         {group && (
-          <a href={`#/g/${group.id}`} className="block truncate text-[13px] text-muted hover:text-text">
+          <a href={`#/g/${group.id}`} className="block truncate px-1.5 text-[13px] text-muted hover:text-text">
             {group.name}
           </a>
         )}

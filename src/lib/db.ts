@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie';
 import { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, PIPELINE_PRESETS, defaultSettings } from './defaults';
 import { normalizePipeline } from './pipeline';
-import { OLD_LANGUAGE_PRACTICE_V1, OLD_PROCESSING_INSTRUCTIONS_V1 } from './migrations';
+import { OLD_LANGUAGE_PRACTICE_V1, OLD_LANGUAGE_PRACTICE_V2, OLD_PROCESSING_INSTRUCTIONS_V1, OLD_PROCESSING_INSTRUCTIONS_V2 } from './migrations';
 import type {
   AudioChunk,
+  PipelineConfig,
   Entry,
   Group,
   Recording,
@@ -79,6 +80,30 @@ export class VoiceNotesDB extends Dexie {
       for (const t of ['groups', 'sessions']) {
         await tx.table(t).toCollection().modify((row: Group | Session) => {
           row.pipeline = normalizePipeline(row.pipeline);
+        });
+      }
+    });
+    // v4: Listen steps write their own transcript instead of being given Whisper's, and the
+    // default listening instructions ask for that transcript (plus IPA for language practice).
+    this.version(4).upgrade(async (tx) => {
+      const swap = (text: string | undefined) =>
+        text === OLD_PROCESSING_INSTRUCTIONS_V2 ? DEFAULT_PROCESSING_INSTRUCTIONS : text === OLD_LANGUAGE_PRACTICE_V2 ? LANGUAGE_PRACTICE_PROCESSING : text;
+      const fix = (p: PipelineConfig | null | undefined) => {
+        p?.steps?.forEach((st) => {
+          if (st.kind !== 'listen') return;
+          st.useTranscript = false;
+          st.instructions = swap(st.instructions) ?? '';
+        });
+      };
+      await tx.table('settings').toCollection().modify((s: Settings) => {
+        s.instructions.processing = swap(s.instructions.processing) ?? '';
+        fix(s.pipeline);
+        s.pipelinePresets?.forEach((p) => fix(p.config));
+      });
+      for (const t of ['groups', 'sessions']) {
+        await tx.table(t).toCollection().modify((row: Group | Session) => {
+          fix(row.pipeline);
+          if (row.instructions?.processing) row.instructions.processing = swap(row.instructions.processing);
         });
       }
     });

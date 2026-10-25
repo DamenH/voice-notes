@@ -92,7 +92,8 @@ test('build a pipeline with Add step and see both outputs', async ({ page }, inf
   const transcribe = page.getByRole('listitem', { name: /Step 1: Transcribe/ });
   // Adding a step folds earlier ones; show the transcript too.
   await transcribe.getByRole('radio', { name: 'Show' }).click();
-  await expect(page.getByRole('listitem', { name: /Step 2: Inkling/ }).getByRole('switch', { name: /Give it the transcript too/ })).toBeChecked();
+  // Inkling writes its own transcript by default.
+  await expect(page.getByRole('listitem', { name: /Step 2: Inkling/ }).getByRole('switch', { name: /Give it the earlier transcript/ })).not.toBeChecked();
   // The hand-built pipeline is recognised as the matching preset.
   await expect(page.getByRole('button', { name: 'Transcribe + Inkling', pressed: true })).toBeVisible();
   await page.waitForTimeout(300);
@@ -108,4 +109,16 @@ test('build a pipeline with Add step and see both outputs', async ({ page }, inf
   await expect(page.locator('article').filter({ hasText: 'cities should invest in bike lanes' })).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: `test-results/shots/${info.project.name}-07-both-outputs.png` });
+});
+
+test('rename a session by clicking its title', async ({ page }) => {
+  await setup(page);
+  await page.goto('./');
+  await page.getByRole('button', { name: /start a session/i }).click();
+  await page.getByRole('button', { name: /— rename/ }).click();
+  await page.getByRole('textbox', { name: 'Session name' }).fill('Spanish practice');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: /Spanish practice/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: /Spanish practice/ })).toBeVisible();
 });

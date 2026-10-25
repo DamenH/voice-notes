@@ -50,7 +50,8 @@ export function step(kind: StepKind, patch: Partial<PipelineStep> = {}): Pipelin
     kind,
     instructions: '',
     output: 'collapse',
-    ...(kind === 'listen' ? { useTranscript: true } : {}),
+    // Audio-aware models write their own transcript unless asked to use an earlier one.
+    ...(kind === 'listen' ? { useTranscript: false } : {}),
     ...(kind === 'assist' ? { input: 'previous' as const } : {}),
     ...patch,
   };

@@ -99,9 +99,11 @@ export async function transcribe(
     segments?: { start: number; end: number; text: string }[];
     usage?: { cost?: number; seconds?: number; input_tokens?: number; output_tokens?: number };
   };
+  // Whisper sometimes starts with stray punctuation (". Test 1, 2, 3.").
+  const clean = (t: string) => t.trim().replace(/^[.,;:!?…-]+\s*/, '');
   return {
-    text: d.text?.trim() ?? '',
-    timestamps: d.segments?.map((s) => ({ start: s.start, end: s.end, text: s.text.trim() })),
+    text: clean(d.text ?? ''),
+    timestamps: d.segments?.map((s, i) => ({ start: s.start, end: s.end, text: i === 0 ? clean(s.text) : s.text.trim() })),
     usage: {
       cost: d.usage?.cost,
       seconds: d.usage?.seconds,

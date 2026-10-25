@@ -124,6 +124,19 @@ migrated (database v2); customised text is left alone.
 Cleanup now uses only transcripts as input. Before, it also received Inkling's
 notes and merged them into the "cleaned transcript".
 
+## Inkling writes its own transcript (2026-10-25)
+
+Listen steps no longer receive Whisper's transcript by default (database v4 turns
+it off for saved pipelines; the toggle remains). The default instructions ask for
+a verbatim transcript, including fillers, repetitions and self-corrections, plus
+bullets only when something stands out. On the English fixture, Inkling's own
+transcript was more faithful than Whisper's: it kept "of, of sharing", which
+Whisper dropped, and added no notes. Language practice asks for IPA of what was
+heard versus the standard pronunciation for mispronounced words. Inkling produced
+it (e.g. "Sevilla: heard /seˈvila/, expected /seˈβiʎa/"), but some claims are
+marginal (e.g. "queso: heard /ˈke.so/, expected /ˈkeso/" differs only by a
+syllable dot). Treat IPA from audio as a hint, not a measurement.
+
 ## Android recording behaviour (expected; verify on a device)
 
 - A screen wake lock is held while recording, so the screen doesn't sleep while
@@ -142,4 +155,5 @@ notes and merged them into the "cleaned transcript".
 | 2026-10-25 | Fixtures (TTS), transcription, Inkling, cleanup probes | < $0.01 |
 | 2026-10-25 | Live smoke runs (3, including one failed and re-run) | ≈ $0.05 |
 | 2026-10-25 | Live smoke run after the step-list pipeline change | ≈ $0.023 |
-| | **Total on the dev key** | **≈ $0.09 of the $5 cap** |
+| 2026-10-25 | Inkling own-transcript/IPA probes and a language-practice live run | ≈ $0.03 |
+| | **Total on the dev key** | **≈ $0.12 of the $5 cap** |

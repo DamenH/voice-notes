@@ -7,11 +7,10 @@ export const LITTLE_DEFAULT = 'anthropic/claude-haiku-5.5';
 export const BIG_DEFAULT = 'anthropic/claude-sonnet-5.5';
 export const TTS_DEFAULT = 'elevenlabs/eleven-flash-v2.5';
 
-export const DEFAULT_PROCESSING_INSTRUCTIONS = `Note only what is worth knowing about how things were said: mispronounced or unclear words, notable pauses or hesitations, self-corrections, and emphasis that changes the meaning.
-- Be brief: at most a few short bullet points, each naming the words concerned.
-- If nothing stands out, reply with one short line saying so.
-- Do not describe the speaker's voice, gender or the recording quality, and do not guess at the purpose of the recording.
-- Mark anything you are unsure about with "(unsure)".`;
+export const DEFAULT_PROCESSING_INSTRUCTIONS = `Write what you hear:
+1. A verbatim transcript, including fillers, false starts, repetitions and self-corrections.
+2. Then, only if something stands out (mispronounced or unclear words, notable pauses or hesitations, emphasis that changes the meaning), a few short bullet points naming the words concerned. If nothing stands out, leave this part out.
+Do not describe the speaker's voice, gender or the recording quality, and do not guess at the purpose of the recording. Mark anything you are unsure about with "(unsure)".`;
 
 export const DEFAULT_INFERENCE_INSTRUCTIONS = `You help someone who thinks, studies, and practises languages aloud.
 Preserve their meaning, uncertainty, and self-corrections. Never invent content they did not say.
@@ -56,7 +55,9 @@ Keep feedback encouraging and specific. Mark anything uncertain.`,
   },
 ];
 
-export const LANGUAGE_PRACTICE_PROCESSING = `The speaker is practising a language they are learning. Focus on pronunciation, stress, intonation and fluency, tied to specific words. Keep it to the few points that matter most for improving.`;
+export const LANGUAGE_PRACTICE_PROCESSING = `The speaker is practising a language they are learning. Transcribe exactly what they said, mistakes included; do not correct it.
+For words that were mispronounced or unclear, give IPA for what you heard and for the standard pronunciation, e.g. word: heard /…/, expected /…/.
+Then add the few points on stress, intonation and fluency that matter most for improving.`;
 
 const transcribe = (id: string, output: 'show' | 'collapse'): PipelineStep => ({ id, kind: 'transcribe', model: STT_DEFAULT, instructions: '', output });
 
@@ -77,7 +78,7 @@ export const PIPELINE_PRESETS: PipelinePreset[] = [
       language: '',
       steps: [
         transcribe('ti-transcribe', 'show'),
-        { id: 'ti-listen', kind: 'listen', model: INKLING, instructions: '', output: 'show', useTranscript: true },
+        { id: 'ti-listen', kind: 'listen', model: INKLING, instructions: '', output: 'show', useTranscript: false },
       ],
     },
     builtin: true,
@@ -89,7 +90,7 @@ export const PIPELINE_PRESETS: PipelinePreset[] = [
       language: '',
       steps: [
         transcribe('lp-transcribe', 'collapse'),
-        { id: 'lp-listen', kind: 'listen', model: INKLING, instructions: LANGUAGE_PRACTICE_PROCESSING, output: 'collapse', useTranscript: true },
+        { id: 'lp-listen', kind: 'listen', model: INKLING, instructions: LANGUAGE_PRACTICE_PROCESSING, output: 'collapse', useTranscript: false },
         { id: 'lp-tutor', kind: 'assist', preset: 'tutor', instructions: '', output: 'show', input: 'all' },
       ],
     },
