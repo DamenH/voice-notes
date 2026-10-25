@@ -1,0 +1,46 @@
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  // Relative base so the same build works at a domain root or under /voice-notes/.
+  base: './',
+  plugins: [
+    react(),
+    tailwindcss(),
+    VitePWA({
+      registerType: 'prompt',
+      injectRegister: false,
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      manifest: {
+        name: 'Voice Notes',
+        short_name: 'Voice Notes',
+        description: 'Think aloud, study, and practise languages with your voice.',
+        start_url: './',
+        scope: './',
+        display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone'],
+        background_color: '#f6f5f1',
+        theme_color: '#f6f5f1',
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        navigateFallback: 'index.html',
+        // The OAuth callback returns to the app root with ?code=; serve the shell for it too.
+        navigateFallbackAllowlist: [/.*/],
+        cleanupOutdatedCaches: true,
+      },
+    }),
+  ],
+  test: {
+    environment: 'node',
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+  },
+})

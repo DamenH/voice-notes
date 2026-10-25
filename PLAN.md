@@ -336,18 +336,18 @@ insets, container queries so panes lay themselves out by their own width, and
 
 - Users connect through OAuth PKCE. A "paste an API key" option is also offered
   in settings, which is what automated tests use.
-- During development the key comes from `OPENROUTER_API_KEY` in `~/.hermes/.env`,
+- During development the key comes from `~/dev-key.txt`,
   read by test scripts at runtime and injected into the browser by Playwright.
   It is never written into the repository, `.env` files in the project, source,
   or build output. A verification step fails the build if `dist/` contains
   `sk-or-`.
-- **Budget:** that key has a $2 limit with about $1.90 remaining. Real API calls
-  are limited to a small, explicitly-invoked smoke suite (`npm run test:live`)
+- **Budget:** that key has a $10 limit; development spend is capped at $5.
+  Real API calls are limited to a small, explicitly-invoked smoke suite (`npm run test:live`)
   using short clips and cheap or `:free` models (e.g. `inkling:free`,
   `inkling-small`, `whisper-large-v3-turbo`, `eleven-flash-v2.5`). The default
   test suites mock OpenRouter. Check spend via `GET /api/v1/key` before and
   after live runs, and stop making live calls once total development spend
-  reaches $1.00.
+  reaches $5.00.
 - Speech fixtures for tests (an English thinking-aloud clip and a short
   second-language clip) are generated once with a cheap TTS model and committed.
 
@@ -449,7 +449,8 @@ from the local cache, and cached audio can be cleared.
 
 Deliverable: a usable PWA with documented browser support, tested recovery behavior,
 and model presets grounded in the sample workflows. Deployment to GitHub Pages is
-prepared (workflow and base path) but not published without the owner's approval.
+via a GitHub Actions workflow to the public repo `DamenH/voice-notes`, served at
+https://damenh.github.io/voice-notes/.
 
 ## Reference documentation
 
