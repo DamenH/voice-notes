@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
   fullyParallel: false,
+  // One worker: the update test rebuilds the app the server is serving.
+  workers: 1,
   reporter: [['list']],
   use: {
     baseURL: 'http://localhost:4173/',

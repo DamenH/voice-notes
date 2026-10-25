@@ -8,7 +8,7 @@ import { newId } from '../lib/ids';
 import type { InferencePreset, Settings } from '../lib/types';
 import { refreshCatalog, useApiKey, useDesktop } from '../app/hooks';
 import { navigate } from '../app/router';
-import { installState, promptInstall, useInstall } from '../app/pwa';
+import { applyUpdate, checkForUpdates, installState, promptInstall, useInstall } from '../app/pwa';
 import { Button, Field, IconButton, Toggle, confirmAction, inputClass, toast } from '../ui/primitives';
 import { ModelSelect } from '../panels/ModelSelect';
 import { PipelineEditor } from '../panels/PipelineEditor';
@@ -366,7 +366,7 @@ function Storage() {
         <Button icon="download" onClick={() => void doExport()} disabled={busy}>
           Export library
         </Button>
-        <label className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-hairline bg-surface-2 px-4 text-sm font-semibold hover:bg-surface-3 pointer-fine:min-h-9 ${busy ? 'opacity-50' : ''}`}>
+        <label className={`relative inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-hairline bg-surface-2 px-4 text-sm font-semibold hover:bg-surface-3 pointer-fine:min-h-9 ${busy ? 'opacity-50' : ''}`}>
           <input type="file" accept=".zip,application/zip" className="sr-only" disabled={busy} onChange={(e) => e.target.files?.[0] && void doImport(e.target.files[0])} />
           Import library
         </label>
@@ -388,8 +388,33 @@ function Storage() {
 
 function AppSection() {
   const install = useInstall();
+  const [checking, setChecking] = useState(false);
+  const check = async () => {
+    setChecking(true);
+    try {
+      const r = await checkForUpdates();
+      if (r === 'current') toast('You have the latest version.');
+      else if (r === 'unsupported') toast('Updates are checked when the app loads; reload to get the latest.');
+    } catch {
+      toast('Could not check for updates. Are you online?', 'error');
+    } finally {
+      setChecking(false);
+    }
+  };
   return (
     <>
+      <div className="flex flex-wrap items-center gap-2">
+        {install.updateReady ? (
+          <Button variant="primary" icon="download" onClick={() => void applyUpdate()}>
+            Update now
+          </Button>
+        ) : (
+          <Button icon="retry" disabled={checking} onClick={() => void check()}>
+            {checking ? 'Checking…' : 'Check for updates'}
+          </Button>
+        )}
+        <p className="text-[13px] text-muted">Updating replaces the app only. Your recordings, settings and connection stay.</p>
+      </div>
       {install.canInstall && (
         <div>
           <Button variant="primary" icon="download" onClick={() => void promptInstall()}>
@@ -404,7 +429,9 @@ function AppSection() {
       <p className="text-[13px] text-muted">
         Recording, playback, browsing and editing work offline. Transcription, Inkling, assistance and read-aloud need a connection; they wait and run when you're back online.
       </p>
-      <p className="text-[13px] text-faint">Version {installState.version}</p>
+      <p className="text-[13px] text-faint">
+        Version {installState.version} · build {installState.build}
+      </p>
     </>
   );
 }

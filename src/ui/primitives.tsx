@@ -171,7 +171,7 @@ export const inputClass =
 
 export function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: ReactNode }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 py-1">
+    <label className="relative flex cursor-pointer items-start gap-3 py-1">
       <span className="flex-1">
         <span className="block text-[15px] font-medium">{label}</span>
         {description && <span className="block text-[13px] text-muted">{description}</span>}

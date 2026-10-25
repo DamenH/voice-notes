@@ -8,6 +8,8 @@ interface BeforeInstallPromptEvent extends Event {
 
 export const installState = {
   version: __APP_VERSION__,
+  build: __BUILD_ID__,
+  registration: null as ServiceWorkerRegistration | null,
   deferred: null as BeforeInstallPromptEvent | null,
   installed: typeof matchMedia !== 'undefined' && matchMedia('(display-mode: standalone)').matches,
   updateReady: false,
@@ -38,9 +40,41 @@ export function initPwa() {
         installState.updateReady = true;
         emit();
       },
+      onRegisteredSW(_url, registration) {
+        installState.registration = registration ?? null;
+        // Look for a new version regularly and whenever the app comes back to the front.
+        setInterval(() => void registration?.update(), 30 * 60 * 1000);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') void registration?.update();
+        });
+      },
     });
     installState.update = () => update(true);
   }
+}
+
+/**
+ * Ask the server for a newer version. Only the app code is replaced; the library,
+ * settings and OpenRouter key live in IndexedDB/localStorage and are untouched.
+ */
+export async function checkForUpdates(): Promise<'available' | 'current' | 'unsupported'> {
+  const reg = installState.registration;
+  if (!reg) return 'unsupported';
+  await reg.update();
+  // A new worker may still be installing; give it a moment to reach "waiting".
+  for (let i = 0; i < 20 && reg.installing && !reg.waiting; i++) await new Promise((r) => setTimeout(r, 250));
+  if (reg.waiting) {
+    installState.updateReady = true;
+    emit();
+    return 'available';
+  }
+  return 'current';
+}
+
+/** Activate a waiting update (or simply reload when there is none). */
+export async function applyUpdate() {
+  if (installState.updateReady && installState.update) await installState.update();
+  else location.reload();
 }
 
 export async function promptInstall() {

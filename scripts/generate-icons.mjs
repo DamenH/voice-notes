@@ -17,7 +17,7 @@ for (const [path, size, maskable] of targets) {
   const scale = maskable ? 0.8 : 1;
   await page.setViewportSize({ width: size, height: size });
   await page.setContent(
-    `<html><body style="margin:0;background:${maskable ? '#2b6a5d' : 'transparent'};display:grid;place-items:center;height:100vh">
+    `<html><body style="margin:0;background:${maskable ? '#4f46c8' : 'transparent'};display:grid;place-items:center;height:100vh">
       <div style="width:${size * scale}px;height:${size * scale}px">${inner.replace('<svg ', '<svg width="100%" height="100%" ')}</div></body></html>`,
   );
   await page.screenshot({ path, omitBackground: !maskable });

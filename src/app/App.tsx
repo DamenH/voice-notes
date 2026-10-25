@@ -113,7 +113,7 @@ function UpdateBanner() {
   return (
     <div className="fixed right-4 bottom-[calc(96px+var(--safe-bottom))] z-40 flex items-center gap-3 rounded-2xl border border-hairline bg-surface px-4 py-3 shadow-xl desk:bottom-6">
       <Icon name="download" size={18} className="text-accent" />
-      <span className="text-[14px]">A new version is ready.</span>
+      <span className="text-[14px]">A new version is ready. Your data stays.</span>
       <Button small variant="primary" disabled={rec.state !== 'idle'} title={rec.state !== 'idle' ? 'Finish recording first' : undefined} onClick={() => void installState.update?.()}>
         Reload
       </Button>
