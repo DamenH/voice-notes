@@ -179,6 +179,8 @@ export async function executeProcessRun(run: Run, segmentSeconds: number, signal
             .map((s) => (done.length > 1 ? `**${formatTime(s.start)}–${formatTime(s.end)}**\n\n${s.text ?? ''}` : (s.text ?? '')))
             .join('\n\n'),
         };
+  // Everything filtered out (e.g. Whisper only produced likely hallucinations).
+  if (run.mode === 'stt' && !assembled.text.trim()) assembled.text = 'No speech detected.';
   const output = await createEntry({
     sessionId: run.sessionId,
     groupId: run.groupId,

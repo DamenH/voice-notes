@@ -139,15 +139,23 @@ syllable dot). Treat IPA from audio as a hint, not a measurement.
 
 ## Skipping silence (2026-10-25)
 
-Speech is detected on the device from 30 ms frame levels. The threshold sits 12 dB
-above the recording's noise floor (its 15th-percentile level), but never higher
-than 10 dB below its loud level, so a recording that is mostly speech keeps its
-quieter words. Regions are padded (0.3 s before, 0.5 s after) and merged across
-pauses shorter than 1.2 s. They are joined with 0.4 s gaps into requests of at most
-five minutes, and Whisper's timestamps are mapped back to recording time.
+Speech is detected on the device from 30 ms frame levels. The noise floor is the
+recording's 10th-percentile level. A region starts where frames rise 9–15 dB above
+it, and it only counts if its peak is at least 15 dB above the floor. A recording
+without that much contrast (steady noise) has no speech. The first version capped
+the threshold at "10 dB below the loud level", so recordings of pure noise (raised
+by the browser's auto gain) were sent whole, and Whisper invented text for them.
+Regions are padded (0.3 s before, 0.5 s after), merged across pauses shorter than
+1.2 s, joined with 0.4 s gaps into requests of at most five minutes, and Whisper's
+timestamps are mapped back to recording time.
 
-Live check: a 1 min 40 s recording with room hiss and two 18 s stretches of speech
-sent one 37.8 s request; both stretches were transcribed in full, and the timestamps
+Whisper's own confidence is also checked: segments with no_speech_prob > 0.6 and
+avg_logprob < -1, or compression_ratio > 2.4 (OpenAI's heuristics), are dropped as
+likely hallucinations.
+
+Live checks: 30 s of noise at about -40 dBFS sent nothing ("No speech detected").
+A 1 min 40 s recording with room hiss and two 18 s stretches of speech sent one
+request (37.8 s with the first version, 55 s with the stricter floor); both stretches were transcribed in full, and the timestamps
 (0:14–0:29, 1:09–1:26) match where the speech was. A recording with no speech makes
 no request. Energy-based detection can be fooled by loud steady noise; if that
 matters, Silero VAD (~2 MB) can run in the browser instead.

@@ -699,3 +699,33 @@ describe('record now, process later', () => {
     expect((await waitingRecordings(first.session.id)).length).toBe(0);
   });
 });
+
+describe('transcripts drop likely hallucinations', () => {
+  it('removes flagged segments from text and timestamps', async () => {
+    mockOpenRouter(() =>
+      json({
+        text: ' Bike lanes matter. Thank you for watching.',
+        segments: [
+          { start: 0, end: 2, text: ' Bike lanes matter.', no_speech_prob: 0.02, avg_logprob: -0.3 },
+          { start: 10, end: 12, text: ' Thank you for watching.', no_speech_prob: 0.9, avg_logprob: -1.4 },
+        ],
+        usage: { cost: 0.0001 },
+      }),
+    );
+    const { entry } = await seedRecording();
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show', skipSilence: false })));
+    await settled(entry.turnId);
+    const t = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(t.text).toBe('Bike lanes matter.');
+    expect(t.timestamps!.length).toBe(1);
+  });
+
+  it('says no speech when everything was flagged', async () => {
+    mockOpenRouter(() => json({ text: ' Thank you.', segments: [{ start: 0, end: 1, text: ' Thank you.', no_speech_prob: 0.95, avg_logprob: -1.5 }], usage: {} }));
+    const { entry } = await seedRecording();
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show', skipSilence: false })));
+    await settled(entry.turnId);
+    const t = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(t.text).toBe('No speech detected.');
+  });
+});

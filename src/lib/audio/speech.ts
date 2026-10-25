@@ -40,24 +40,34 @@ function percentile(values: Float32Array, p: number) {
 }
 
 /**
- * Find speech in a recording from its frame levels. The threshold adapts to the
- * recording: it sits above the background-noise floor, but never so high that quieter
- * speech in a mostly-speech recording is lost.
+ * Find speech in a recording from its frame levels. The noise floor is the recording's
+ * quiet level (10th percentile). Speech must stand clearly above it: frames above the
+ * threshold start a region, and a region only counts if its peak is at least
+ * MIN_CONTRAST dB over the floor. Steady noise (no contrast) therefore yields nothing,
+ * even when the browser's gain control has boosted it.
  */
+export const MIN_CONTRAST = 15;
+
 export function detectSpeech(levels: Float32Array, offset: number, opts: SpeechOptions = DEFAULT_SPEECH): Range[] {
   if (levels.length === 0) return [];
-  const floor = percentile(levels, 0.15);
+  const floor = percentile(levels, 0.1);
   const loud = percentile(levels, 0.95);
-  const threshold = Math.max(-60, Math.min(floor + 12, loud - 10));
-  if (loud < -55) return []; // essentially silent throughout
+  if (loud < -55 || loud - floor < MIN_CONTRAST) return []; // silent, or steady noise only
+  // Halfway-ish between floor and loud, but at least 9 dB above the floor.
+  const threshold = floor + Math.min(15, Math.max(9, loud - floor - 10));
   const raw: Range[] = [];
   let begin = -1;
+  let peak = -Infinity;
   for (let i = 0; i <= levels.length; i++) {
     const on = i < levels.length && levels[i] > threshold;
-    if (on && begin < 0) begin = i;
+    if (on) {
+      if (begin < 0) begin = i;
+      peak = Math.max(peak, levels[i]);
+    }
     if (!on && begin >= 0) {
-      if ((i - begin) * FRAME >= opts.minSpeech) raw.push({ start: begin * FRAME, end: i * FRAME });
+      if ((i - begin) * FRAME >= opts.minSpeech && peak >= floor + MIN_CONTRAST) raw.push({ start: begin * FRAME, end: i * FRAME });
       begin = -1;
+      peak = -Infinity;
     }
   }
   const total = levels.length * FRAME;

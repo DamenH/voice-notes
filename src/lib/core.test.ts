@@ -160,3 +160,38 @@ describe('speech detection', () => {
     expect(detectSpeech(new Float32Array(300).fill(-90), 0)).toEqual([]);
   });
 });
+
+describe('noise floor', () => {
+  it('ignores steady noise even when gain control has boosted it', async () => {
+    const { detectSpeech, FRAME } = await import('./audio/speech');
+    const levels = new Float32Array(Math.round(60 / FRAME)).map((_, i) => -40 + 3 * Math.sin(i * 0.7) + ((i * 7919) % 5) - 2);
+    expect(detectSpeech(levels, 0)).toEqual([]);
+  });
+
+  it('still finds speech over that noise', async () => {
+    const { detectSpeech, FRAME } = await import('./audio/speech');
+    const levels = new Float32Array(Math.round(60 / FRAME)).map((_, i) => -40 + 3 * Math.sin(i * 0.7) + ((i * 7919) % 5) - 2);
+    levels.fill(-18, Math.round(20 / FRAME), Math.round(24 / FRAME));
+    const regions = detectSpeech(levels, 0);
+    expect(regions.length).toBe(1);
+    expect(regions[0].start).toBeCloseTo(19.7, 1);
+  });
+
+  it('drops a brief noise bump that only just crosses the threshold', async () => {
+    const { detectSpeech, FRAME } = await import('./audio/speech');
+    const levels = new Float32Array(Math.round(30 / FRAME)).fill(-45);
+    levels.fill(-15, Math.round(5 / FRAME), Math.round(8 / FRAME)); // speech, gives contrast
+    levels.fill(-33, Math.round(20 / FRAME), Math.round(21 / FRAME)); // a knock: above threshold, below floor + 15
+    expect(detectSpeech(levels, 0).length).toBe(1);
+  });
+});
+
+describe('whisper hallucination filter', () => {
+  it('drops segments Whisper marks as probably not speech, and repetitive ones', async () => {
+    const { likelyHallucination } = await import('./openrouter/client');
+    expect(likelyHallucination({ start: 0, end: 2, text: ' Thank you for watching.', no_speech_prob: 0.8, avg_logprob: -1.3 })).toBe(true);
+    expect(likelyHallucination({ start: 0, end: 2, text: ' you you you you you you', compression_ratio: 3.1 })).toBe(true);
+    expect(likelyHallucination({ start: 0, end: 2, text: ' Bike lanes.', no_speech_prob: 0.7, avg_logprob: -0.3 })).toBe(false);
+    expect(likelyHallucination({ start: 0, end: 2, text: ' Bike lanes.', no_speech_prob: 0.01, avg_logprob: -0.4 })).toBe(false);
+  });
+});

@@ -71,6 +71,28 @@ export interface TranscriptionResult {
   text: string;
   timestamps?: TimedText[];
   usage: Usage;
+  /** Segments discarded as likely hallucinations. */
+  dropped?: number;
+}
+
+export interface WhisperSegment {
+  start: number;
+  end: number;
+  text: string;
+  no_speech_prob?: number;
+  avg_logprob?: number;
+  compression_ratio?: number;
+}
+
+/**
+ * OpenAI's own Whisper heuristics: a segment is unreliable when the model thinks there
+ * was probably no speech and it was unsure of the words, or when the text is highly
+ * repetitive (a common failure on silence and noise).
+ */
+export function likelyHallucination(s: WhisperSegment): boolean {
+  const noSpeech = (s.no_speech_prob ?? 0) > 0.6 && (s.avg_logprob ?? 0) < -1;
+  const repetitive = (s.compression_ratio ?? 0) > 2.4;
+  return noSpeech || repetitive;
 }
 
 export async function transcribe(
@@ -96,14 +118,19 @@ export async function transcribe(
   }
   const d = (await res.json()) as {
     text: string;
-    segments?: { start: number; end: number; text: string }[];
+    segments?: WhisperSegment[];
     usage?: { cost?: number; seconds?: number; input_tokens?: number; output_tokens?: number };
   };
   // Whisper sometimes starts with stray punctuation (". Test 1, 2, 3.").
   const clean = (t: string) => t.trim().replace(/^[.,;:!?…-]+\s*/, '');
+  // Drop parts Whisper itself marks as likely made up (silence or noise), then rebuild the text.
+  const kept = d.segments?.filter((s) => !likelyHallucination(s));
+  const dropped = (d.segments?.length ?? 0) - (kept?.length ?? 0);
+  const text = kept && dropped > 0 ? kept.map((s) => s.text.trim()).join(' ') : (d.text ?? '');
   return {
-    text: clean(d.text ?? ''),
-    timestamps: d.segments?.map((s, i) => ({ start: s.start, end: s.end, text: i === 0 ? clean(s.text) : s.text.trim() })),
+    text: clean(text),
+    timestamps: kept?.map((s, i) => ({ start: s.start, end: s.end, text: i === 0 ? clean(s.text) : s.text.trim() })),
+    dropped,
     usage: {
       cost: d.usage?.cost,
       seconds: d.usage?.seconds,
