@@ -10,6 +10,7 @@ const PATHS = {
   back: 'M15 18l-6-6 6-6',
   chevron: 'M9 6l6 6-6 6',
   down: 'M6 9l6 6 6-6',
+  up: 'M6 15l6-6 6 6',
   close: 'M6 6l12 12M18 6 6 18',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',

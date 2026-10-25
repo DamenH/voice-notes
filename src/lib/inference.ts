@@ -6,7 +6,7 @@ import { chat } from './openrouter/client';
 import { addUsage, RunPaused } from './processing';
 import { presetById, requestToolProcessing } from './runs';
 import { TOOL_SPECS, ToolError, boundedResult, executeTool } from './tools';
-import type { ChatMessage, Entry, Run, Settings } from './types';
+import type { ChatMessage, Entry, Run, Settings, SourceRef } from './types';
 
 /** Characters of material per cleanup request (~5K tokens of output, well within model limits). */
 export const CHUNK_CHARS = 20000;
@@ -54,8 +54,9 @@ export function splitForChunks(text: string, max = CHUNK_CHARS): string[] {
 
 async function sourceEntries(run: Run): Promise<Entry[]> {
   if (run.dependsOn.length) {
+    // Outputs of earlier steps, in step order: transcripts, audio notes, or earlier assistance (chaining).
     const deps = await db.runs.bulkGet(run.dependsOn);
-    const ids = deps.flatMap((d) => (d?.kind === 'process' ? d.outputEntryIds : []));
+    const ids = deps.flatMap((d) => d?.outputEntryIds ?? []);
     return (await db.entries.bulkGet(ids)).filter((e): e is Entry => !!e);
   }
   return (await db.entries.bulkGet(run.sourceRefs.map((r) => r.entryId))).filter((e): e is Entry => !!e);
@@ -102,7 +103,8 @@ async function outputEntry(run: Run, title: string): Promise<Entry> {
     title,
     text: '',
     status: 'running',
-    visibility: 'primary',
+    // Pipeline steps set to "Collapse" keep their output behind the turn's summary line.
+    visibility: run.settings.primary === false ? 'detail' : 'primary',
     sourceRefs: run.sourceRefs.map((r) => ({ entryId: r.entryId })),
     meta: { model: run.model, tier: run.tier },
   });
@@ -179,6 +181,7 @@ export async function executeInferRun(run: Run, settings: Settings, signal: Abor
 
   const useTools = run.mode === 'chat' ? run.settings.tools !== false : !!preset?.tools;
   let messages: ChatMessage[] = run.messages ?? [];
+  let readFrom: SourceRef[] | undefined;
   if (messages.length === 0) {
     const system = [run.instructions, useTools ? TOOL_GUIDE : ''].filter(Boolean).join('\n\n');
     if (run.mode === 'chat') {
@@ -188,6 +191,7 @@ export async function executeInferRun(run: Run, settings: Settings, signal: Abor
       ];
     } else {
       const sources = await sourceEntries(run);
+      readFrom = sources.map((e) => ({ entryId: e.id }));
       messages = [
         { role: 'system', content: system },
         { role: 'user', content: sources.map((s) => `${label(s)}\n${s.text}`).join('\n\n') || '(no material)' },
@@ -237,7 +241,7 @@ export async function executeInferRun(run: Run, settings: Settings, signal: Abor
     messages.push(r.message);
     const calls = r.message.tool_calls ?? [];
     if (calls.length === 0) {
-      await updateEntry(out.id, { text: String(r.message.content ?? '').trim(), status: 'done' });
+      await updateEntry(out.id, { text: String(r.message.content ?? '').trim(), status: 'done', ...(readFrom?.length ? { sourceRefs: readFrom } : {}) });
       await db.runs.update(run.id, { messages, toolRounds: rounds });
       return;
     }

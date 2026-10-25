@@ -9,13 +9,15 @@ import { planPipeline } from '../lib/runs';
 import { formatTime, parseTime } from '../lib/audio/pcm';
 import { describePrice, catalogModel, formatCost, voicesFor } from '../lib/openrouter/catalog';
 import { friendlyError } from '../lib/openrouter/client';
-import { modelName, runVerb } from '../lib/pipelineInfo';
+import { runVerb } from '../lib/pipelineInfo';
 import { speechPlayer } from '../lib/tts';
-import type { Entry, Group, InstructionSet, PipelineConfig, ProcessMode, Session, Settings, TtsSettings } from '../lib/types';
+import type { Entry, Group, InstructionSet, PipelineConfig, Session, Settings, TtsSettings } from '../lib/types';
+import { INKLING, STT_DEFAULT } from '../lib/defaults';
+import { clonePipeline, samePipeline, step } from '../lib/pipeline';
+import { StepsEditor } from './StepsEditor';
 import { useCatalog } from '../app/hooks';
 import { closePanel, playRecording, type Panel } from '../app/stores';
 import { Button, Field, Segmented, Toggle, inputClass, toast } from '../ui/primitives';
-import { ModelSelect } from './ModelSelect';
 import { PipelineEditor, type Scope } from './PipelineEditor';
 import { StatusBadge } from '../session/Timeline';
 
@@ -275,15 +277,19 @@ function ProcessPanel({
 }) {
   useCatalog();
   const entry = useLiveQuery(() => db.entries.get(entryId), [entryId]);
-  const base = resolvePipeline(settings, group, session);
-  const [config, setConfig] = useState<PipelineConfig>(() => ({
-    process: { ...base.process, mode: initialMode ?? (base.process.mode === 'off' ? 'stt' : base.process.mode) },
-    infer: initialMode === 'audio' ? { preset: 'off', instructions: '' } : base.infer,
-  }));
+  // A local copy of the session's pipeline: editing it here never changes the session.
+  const [config, setConfig] = useState<PipelineConfig>(() => {
+    const base = resolvePipeline(settings, group, session);
+    if (initialMode === 'audio') {
+      const model = base.steps.find((s) => s.kind === 'listen')?.model ?? settings.audioOptions[0]?.id ?? INKLING;
+      return { language: base.language, steps: [step('listen', { model, output: 'show', useTranscript: false })] };
+    }
+    if (base.steps.length === 0) return { language: base.language, steps: [step('transcribe', { model: settings.sttOptions[0]?.id ?? STT_DEFAULT, output: 'show' })] };
+    return clonePipeline(base);
+  });
   const duration = Number(entry?.meta?.duration ?? 0);
   const [start, setStart] = useState('0:00');
   const [end, setEnd] = useState('');
-  const [extra, setExtra] = useState('');
   const [estimate, setEstimate] = useState<number | null>(null);
   const range = useMemo(() => {
     const s = parseTime(start) ?? 0;
@@ -294,11 +300,10 @@ function ProcessPanel({
     if (entry) void planPipeline(entry, config, { trigger: 'manual', range }).then((p) => setEstimate(p.unknownPrices ? null : p.estimate));
   }, [entry, config, range]);
   if (!entry) return <p className="text-muted">This recording was deleted.</p>;
-  const setProcess = (patch: Partial<PipelineConfig['process']>) => setConfig((c) => ({ ...c, process: { ...c.process, ...patch } }));
-  const valid = range.end - range.start >= 0.5;
+  const valid = range.end - range.start >= 0.5 && config.steps.length > 0;
   const run = async () => {
     try {
-      await processRecording(entry.id, config, { range, extraInstructions: extra });
+      await processRecording(entry.id, config, { range });
       closePanel();
     } catch (e) {
       toast(friendlyError(e), 'error');
@@ -307,22 +312,24 @@ function ProcessPanel({
   const recordingId = entry.meta?.recordingId as string;
   return (
     <div className="flex flex-col gap-4">
-      <Segmented<ProcessMode>
-        label="Processing mode"
-        value={config.process.mode}
-        onChange={(mode) => setProcess({ mode })}
-        options={[
-          { value: 'stt', label: 'Transcribe' },
-          { value: 'audio', label: 'Inkling' },
-          { value: 'combined', label: 'Both' },
-        ]}
-      />
-      {(config.process.mode === 'stt' || config.process.mode === 'combined') && (
-        <ModelSelect label="Transcription model" kind="transcription" value={config.process.sttModel} options={settings.sttOptions} onChange={(sttModel) => setProcess({ sttModel })} />
-      )}
-      {(config.process.mode === 'audio' || config.process.mode === 'combined') && (
-        <ModelSelect label="Audio-aware model" kind="chat" requireAudio value={config.process.audioModel} options={settings.audioOptions} onChange={(audioModel) => setProcess({ audioModel })} />
-      )}
+      <div className="flex flex-wrap gap-2">
+        {settings.pipelinePresets
+          .filter((p) => p.config.steps.length > 0)
+          .map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setConfig(clonePipeline(p.config))}
+              aria-pressed={samePipeline(p.config, config)}
+              className={`min-h-9 rounded-full border px-3 text-[13px] font-semibold transition ${
+                samePipeline(p.config, config) ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-text'
+              }`}
+            >
+              {p.name}
+            </button>
+          ))}
+      </div>
+      <StepsEditor config={config} change={(fn) => setConfig(fn)} settings={settings} />
       <div className="grid grid-cols-2 gap-3">
         <Field label="From">
           <input className={inputClass} value={start} onChange={(e) => setStart(e.target.value)} inputMode="numeric" placeholder="0:00" />
@@ -332,27 +339,12 @@ function ProcessPanel({
         </Field>
       </div>
       <div>
-        <Button small icon="play" onClick={() => void playRecording(entry.id, recordingId, duration, range.start, range.end)} disabled={!valid}>
+        <Button small icon="play" onClick={() => void playRecording(entry.id, recordingId, duration, range.start, range.end)} disabled={range.end - range.start < 0.5}>
           Preview {formatTime(range.start)}–{formatTime(range.end)}
         </Button>
       </div>
-      {(config.process.mode === 'audio' || config.process.mode === 'combined') && (
-        <Field label="What should the model listen for?" hint="Added to the instruction chain for this run only.">
-          <textarea className={`${inputClass} min-h-24`} value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="e.g. Check my rolled r sounds and where I hesitate." />
-        </Field>
-      )}
-      <Field label="Then">
-        <select className={inputClass} value={config.infer.preset} onChange={(e) => setConfig((c) => ({ ...c, infer: { ...c.infer, preset: e.target.value } }))}>
-          <option value="off">Nothing</option>
-          {settings.inferencePresets.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} ({p.tier === 'big' ? 'Big' : 'Little'} · {modelName(settings.models[p.tier], settings)})
-            </option>
-          ))}
-        </select>
-      </Field>
       <p className="text-[13px] text-muted">
-        Estimated {estimate === null ? 'cost unknown' : formatCost(estimate)} · earlier results are kept.
+        Estimated {estimate === null ? 'cost unknown' : formatCost(estimate)} · earlier results are kept · the session's pipeline is not changed.
       </p>
       <Button variant="primary" onClick={() => void run()} disabled={!valid}>
         Start processing

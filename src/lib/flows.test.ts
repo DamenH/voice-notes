@@ -9,7 +9,13 @@ import { executeTool } from './tools';
 import { exportLibrary, importLibrary } from './backup';
 import { readPcm } from './audio/store';
 import { setCatalogForTests } from './openrouter/catalog';
-import { DEFAULT_PIPELINE, PIPELINE_PRESETS } from './defaults';
+import { PIPELINE_PRESETS } from './defaults';
+import { step } from './pipeline';
+import type { PipelineConfig, PipelineStep } from './types';
+
+const pipeline = (...steps: PipelineStep[]): PipelineConfig => ({ language: '', steps });
+const WHISPER = 'openai/whisper-large-v3-turbo';
+const INK = 'thinkingmachines/inkling';
 import { mockOpenRouter, seedRecording, textStream, toolCallStream, waitFor } from '../test/helpers';
 
 const WHISPER_RESPONSE = {
@@ -190,7 +196,10 @@ describe('combined mode with Inkling', () => {
   it('sends audio and the transcript to the audio-aware model and keeps outputs separate', async () => {
     const calls = mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('Observed: a pause before "queso".')));
     const { entry } = await seedRecording();
-    const config = { ...PIPELINE_PRESETS[1].config, infer: { preset: 'off', instructions: '' } };
+    const config = pipeline(
+      step('transcribe', { model: WHISPER, output: 'show' }),
+      step('listen', { model: INK, output: 'show', useTranscript: true, instructions: 'The speaker is practising a language.' }),
+    );
     await processRecording(entry.id, config);
     const runs = await settled(entry.turnId);
     expect(runs.map((r) => r.mode)).toEqual(['stt', 'audio']);
@@ -204,6 +213,8 @@ describe('combined mode with Inkling', () => {
     // The audio run records its dependency on the transcript.
     expect(runs[1].dependsOn).toEqual([runs[0].id]);
     expect(runs[1].instructions).toContain('practising a language');
+    // Both steps were set to Show.
+    expect(outs.filter((e) => e.kind === 'transcript' || e.kind === 'audio_notes').every((e) => e.visibility === 'primary')).toBe(true);
   });
 });
 
@@ -283,7 +294,7 @@ describe('long transcripts', () => {
       return textStream(`[chunk ${n}]`);
     });
     const { entry } = await seedRecording();
-    await processRecording(entry.id, { ...DEFAULT_PIPELINE, process: { ...DEFAULT_PIPELINE.process, sttModel: 'openai/gpt-4o-mini-transcribe' } });
+    await processRecording(entry.id, pipeline(step('transcribe', { model: 'openai/gpt-4o-mini-transcribe' }), step('assist', { preset: 'cleanup', output: 'show' })));
     await settled(entry.turnId);
     const cleanup = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'inference')!;
     const chunkCalls = calls.filter((c) => c.path === 'chat/completions');
@@ -361,7 +372,7 @@ describe('long recordings', () => {
       return textStream('ok');
     });
     const { entry } = await seedRecording(samples, rate);
-    await processRecording(entry.id, { ...DEFAULT_PIPELINE, infer: { preset: 'off', instructions: '' } });
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' })));
     const [run] = await settled(entry.turnId);
     expect(run.status).toBe('done');
     const segs = await db.segments.where('runId').equals(run.id).sortBy('index');
@@ -385,7 +396,10 @@ describe('fixes from review', () => {
       return textStream('Cleaned.');
     });
     const { entry } = await seedRecording();
-    await processRecording(entry.id, { ...PIPELINE_PRESETS[1].config, infer: { preset: 'cleanup', instructions: '' } });
+    await processRecording(
+      entry.id,
+      pipeline(step('transcribe', { model: WHISPER }), step('listen', { model: INK, useTranscript: true }), step('assist', { preset: 'cleanup', input: 'all', output: 'show' })),
+    );
     await settled(entry.turnId);
     const cleanupCall = calls.find((c) => c.path === 'chat/completions' && c.body.model === 'anthropic/claude-haiku-5.5')!;
     const sent = JSON.stringify(cleanupCall.body.messages);
@@ -396,7 +410,7 @@ describe('fixes from review', () => {
     expect(JSON.stringify(inkling.body.messages)).toContain('Do not repeat the transcript');
   });
 
-  it('migrates saved old default instructions to the shorter ones, keeping custom text', async () => {
+  it('migrates old saved settings: shorter instructions (v2) and step-list pipelines (v3)', async () => {
     const { default: Dexie } = await import('dexie');
     const { OLD_PROCESSING_INSTRUCTIONS_V1, OLD_LANGUAGE_PRACTICE_V1 } = await import('./migrations');
     const { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, defaultSettings } = await import('./defaults');
@@ -404,19 +418,107 @@ describe('fixes from review', () => {
     const name = `migrate-${Math.random()}`;
     const v1 = new Dexie(name);
     v1.version(1).stores({ groups: 'id', sessions: 'id', settings: 'id' });
-    const s = defaultSettings();
-    s.instructions.processing = OLD_PROCESSING_INSTRUCTIONS_V1;
-    s.pipelinePresets[1].config.process.instructions = OLD_LANGUAGE_PRACTICE_V1;
-    await v1.table('settings').put(s);
-    await v1.table('sessions').put({ id: 's1', instructions: { processing: 'My own words.' }, pipeline: { process: { instructions: OLD_LANGUAGE_PRACTICE_V1 } } });
+    const legacy = (mode: string, preset: string, instructions = '') => ({
+      process: { mode, sttModel: WHISPER, audioModel: INK, language: 'es', transcriptToAudioModel: true, instructions },
+      infer: { preset, instructions: '' },
+    });
+    await v1.table('settings').put({
+      ...defaultSettings(),
+      instructions: { processing: OLD_PROCESSING_INSTRUCTIONS_V1, inference: 'x' },
+      pipeline: legacy('stt', 'cleanup'),
+      pipelinePresets: [
+        { id: 'thinking-aloud', name: 'Thinking aloud', config: legacy('stt', 'cleanup'), builtin: true },
+        { id: 'language-practice', name: 'Language practice', config: legacy('combined', 'tutor', OLD_LANGUAGE_PRACTICE_V1), builtin: true },
+      ],
+    });
+    await v1.table('sessions').put({ id: 's1', instructions: { processing: 'My own words.' }, pipeline: legacy('combined', 'off', OLD_LANGUAGE_PRACTICE_V1) });
     v1.close();
-    const v2 = new VoiceNotesDB(name);
-    const migrated = (await v2.settings.get('global'))!;
+
+    const db3 = new VoiceNotesDB(name);
+    const migrated = (await db3.settings.get('global'))!;
     expect(migrated.instructions.processing).toBe(DEFAULT_PROCESSING_INSTRUCTIONS);
-    expect(migrated.pipelinePresets[1].config.process.instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
-    const session = (await v2.sessions.get('s1'))!;
+    expect(migrated.pipeline.steps.map((x) => [x.kind, x.output])).toEqual([
+      ['transcribe', 'collapse'],
+      ['assist', 'show'],
+    ]);
+    expect(migrated.pipeline.language).toBe('es');
+    const lp = migrated.pipelinePresets.find((p) => p.id === 'language-practice')!.config;
+    expect(lp.steps.map((x) => x.kind)).toEqual(['transcribe', 'listen', 'assist']);
+    expect(lp.steps[1].instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
+    expect(lp.steps[2].input).toBe('all');
+    expect(migrated.pipelinePresets.some((p) => p.id === 'transcribe-inkling')).toBe(true);
+    const session = (await db3.sessions.get('s1'))!;
     expect(session.instructions.processing).toBe('My own words.');
-    expect(session.pipeline!.process.instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
-    v2.close();
+    // Combined without assistance: transcript collapsed, Inkling's notes shown, as before.
+    expect(session.pipeline!.steps.map((x) => [x.kind, x.output, x.useTranscript ?? null])).toEqual([
+      ['transcribe', 'collapse', null],
+      ['listen', 'show', true],
+    ]);
+    db3.close();
+  });
+});
+
+describe('multi-step pipelines', () => {
+  it('chains assist steps: summarise reads the cleanup, not the transcript', async () => {
+    const calls = mockOpenRouter((path, body) => {
+      if (path === 'audio/transcriptions') return json(WHISPER_RESPONSE);
+      const sys = JSON.stringify((body.messages as unknown[])[0]);
+      return textStream(sys.includes('Clean up') ? 'CLEANED TEXT about bike lanes.' : '- Summary point');
+    });
+    const { entry } = await seedRecording();
+    await processRecording(
+      entry.id,
+      pipeline(step('transcribe', { model: WHISPER }), step('assist', { preset: 'cleanup' }), step('assist', { preset: 'summarize', output: 'show' })),
+    );
+    const runs = await settled(entry.turnId);
+    expect(runs.map((r) => [r.mode, r.status])).toEqual([
+      ['stt', 'done'],
+      ['cleanup', 'done'],
+      ['summarize', 'done'],
+    ]);
+    expect(runs[2].dependsOn).toEqual([runs[1].id]);
+    const summariseCall = calls.filter((c) => c.path === 'chat/completions').at(-1)!;
+    const sent = JSON.stringify(summariseCall.body.messages);
+    expect(sent).toContain('CLEANED TEXT');
+    expect(sent).not.toContain('um, bike lanes');
+    // Show/Collapse: only the last step is in the session view; it links back to the cleanup.
+    const entries = await db.entries.where('turnId').equals(entry.turnId).sortBy('createdAt');
+    const visible = entries.filter((e) => e.visibility === 'primary' && e.id !== entry.id);
+    expect(visible.map((e) => e.text)).toEqual(['- Summary point']);
+    const cleanup = entries.find((e) => e.text.startsWith('CLEANED'))!;
+    expect(cleanup.visibility).toBe('detail');
+    expect(visible[0].sourceRefs.map((r) => r.entryId)).toEqual([cleanup.id]);
+  });
+
+  it('runs independent steps and skips an assist step with nothing before it', async () => {
+    const calls = mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('notes')));
+    const { entry } = await seedRecording();
+    const plan = await processRecording(entry.id, pipeline(step('assist', { preset: 'cleanup' }), step('listen', { model: INK, output: 'show' })));
+    expect(plan.runs.map((r) => r.mode)).toEqual(['audio']);
+    await settled(entry.turnId);
+    // With no transcript available, Inkling is asked to transcribe first.
+    expect(JSON.stringify(calls[0].body.messages)).toContain('Start with a verbatim transcript');
+  });
+
+  it('the Transcribe + Inkling preset shows both outputs side by side', async () => {
+    mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('- hesitation on "um"')));
+    const { entry } = await seedRecording();
+    await processRecording(entry.id, PIPELINE_PRESETS.find((p) => p.id === 'transcribe-inkling')!.config);
+    await settled(entry.turnId);
+    const shown = (await db.entries.where('turnId').equals(entry.turnId).sortBy('createdAt')).filter((e) => e.visibility === 'primary' && e.id !== entry.id);
+    expect(shown.map((e) => e.kind)).toEqual(['transcript', 'audio_notes']);
+  });
+
+  it('accepts old-shape pipelines from an imported library', async () => {
+    const calls = mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('Clean.')));
+    const { entry, session } = await seedRecording();
+    // As if imported from an export made before step lists.
+    await db.sessions.update(session.id, {
+      pipeline: { process: { mode: 'stt', sttModel: WHISPER, audioModel: INK, language: '', transcriptToAudioModel: true, instructions: '' }, infer: { preset: 'cleanup', instructions: '' } } as never,
+    });
+    await runPipelineForRecording(entry.id);
+    const runs = await settled(entry.turnId);
+    expect(runs.map((r) => r.mode)).toEqual(['stt', 'cleanup']);
+    expect(calls.length).toBe(2);
   });
 });

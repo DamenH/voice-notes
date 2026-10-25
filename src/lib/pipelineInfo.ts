@@ -1,28 +1,31 @@
 import { catalogModel, isKnown } from './openrouter/catalog';
 import { estimateRun, presetById } from './runs';
-import type { PipelineConfig, Run, Settings } from './types';
+import type { PipelineConfig, PipelineStep, Run, Settings } from './types';
+import { stepProblem } from './pipeline';
 
-export function processLabel(mode: PipelineConfig['process']['mode']) {
-  return { off: 'Save only', stt: 'Transcribe', audio: 'Inkling', combined: 'Transcribe + Inkling' }[mode];
+export function stepLabel(step: PipelineStep, settings: Settings): string {
+  if (step.kind === 'transcribe') return 'Transcribe';
+  if (step.kind === 'listen') return step.model?.includes('inkling') ? 'Inkling' : 'Listen';
+  return presetById(settings, step.preset ?? '')?.name ?? 'Assist';
 }
 
 /** Short step list for the pipeline control, e.g. ["Transcribe", "Clean up"]. */
 export function pipelineSteps(config: PipelineConfig, settings: Settings): string[] {
-  const steps = [processLabel(config.process.mode)];
-  if (config.process.mode !== 'off' && config.infer.preset !== 'off') {
-    steps.push(presetById(settings, config.infer.preset)?.name ?? config.infer.preset);
-  }
-  return steps;
+  return config.steps.length ? config.steps.map((s) => stepLabel(s, settings)) : ['Save only'];
 }
 
 /** Estimated USD per minute of audio for a pipeline, and whether any price was unknown. */
 export function pipelineCostPerMinute(config: PipelineConfig, settings: Settings): { perMinute: number; unknown: boolean } {
   const runs: Pick<Run, 'kind' | 'mode' | 'model'>[] = [];
-  const p = config.process;
-  if (p.mode === 'stt' || p.mode === 'combined') runs.push({ kind: 'process', mode: 'stt', model: p.sttModel });
-  if (p.mode === 'audio' || p.mode === 'combined') runs.push({ kind: 'process', mode: 'audio', model: p.audioModel });
-  const preset = config.infer.preset === 'off' ? undefined : presetById(settings, config.infer.preset);
-  if (preset && runs.length) runs.push({ kind: 'infer', mode: preset.id, model: settings.models[preset.tier] });
+  config.steps.forEach((s, i) => {
+    if (stepProblem(config.steps, i)) return;
+    if (s.kind === 'transcribe') runs.push({ kind: 'process', mode: 'stt', model: s.model! });
+    else if (s.kind === 'listen') runs.push({ kind: 'process', mode: 'audio', model: s.model! });
+    else {
+      const preset = presetById(settings, s.preset!);
+      if (preset) runs.push({ kind: 'infer', mode: preset.id, model: settings.models[preset.tier] });
+    }
+  });
   return {
     perMinute: runs.reduce((n, r) => n + estimateRun(r, 60, settings), 0),
     unknown: runs.some((r) => !isKnown(r.model)),

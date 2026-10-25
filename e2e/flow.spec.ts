@@ -46,14 +46,14 @@ test('pipeline control opens inline and switches to Inkling', async ({ page }, i
   await page.goto('./');
   await page.getByRole('button', { name: /start a session/i }).click();
   await page.getByRole('button', { name: /On stop: Transcribe, then Clean up/ }).click();
-  await expect(page.getByText('1. Process the audio')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Steps' })).toBeVisible();
   await page.getByRole('button', { name: 'Language practice' }).click();
   await expect(page.getByText('Inkling hears the audio itself')).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `test-results/shots/${info.project.name}-05-pipeline.png` });
   if (info.project.name === 'mobile') await page.getByRole('button', { name: 'Close' }).click();
   else await page.getByRole('button', { name: 'Close panel' }).click();
-  await expect(page.getByRole('button', { name: /On stop: Transcribe \+ Inkling, then Language feedback/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /On stop: Transcribe, then Inkling, then Language feedback/ })).toBeVisible();
 });
 
 test('failures stay visible and retry resumes', async ({ page }) => {
@@ -79,4 +79,33 @@ test('chat with Big uses the composer', async ({ page }) => {
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('start with the shared-resource argument')).toBeVisible();
   await expect(page.getByText('Where should I start?')).toBeVisible();
+});
+
+test('build a pipeline with Add step and see both outputs', async ({ page }, info) => {
+  await setup(page, { chat: () => '- Hesitation before "bike lanes" (unsure)' });
+  await page.goto('./');
+  await page.getByRole('button', { name: /start a session/i }).click();
+  await page.getByRole('button', { name: /On stop:/ }).click();
+  await page.getByRole('button', { name: 'Transcribe only' }).click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByRole('menuitem', { name: 'Listen (Inkling)' }).click();
+  const transcribe = page.getByRole('listitem', { name: /Step 1: Transcribe/ });
+  // Adding a step folds earlier ones; show the transcript too.
+  await transcribe.getByRole('radio', { name: 'Show' }).click();
+  await expect(page.getByRole('listitem', { name: /Step 2: Inkling/ }).getByRole('switch', { name: /Give it the transcript too/ })).toBeChecked();
+  // The hand-built pipeline is recognised as the matching preset.
+  await expect(page.getByRole('button', { name: 'Transcribe + Inkling', pressed: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `test-results/shots/${info.project.name}-06-steps.png` });
+  if (info.project.name === 'mobile') await page.getByRole('button', { name: 'Close' }).click();
+  else await page.getByRole('button', { name: 'Close panel' }).click();
+  await expect(page.getByRole('button', { name: /On stop: Transcribe, then Inkling\./ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Stop recording' }).click();
+  await expect(page.locator('article').filter({ hasText: 'Hesitation before' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('article').filter({ hasText: 'cities should invest in bike lanes' })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `test-results/shots/${info.project.name}-07-both-outputs.png` });
 });

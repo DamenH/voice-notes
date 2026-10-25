@@ -16,12 +16,19 @@ responses read aloud with ElevenLabs voices.
 
 ## How it works
 
-| Step | Default | Options |
+Recording is 16 kHz mono PCM, saved every 5 s. When you stop, the session's
+**pipeline** runs: an ordered list of up to five steps.
+
+| Step | What it does | Default model |
 | --- | --- | --- |
-| Record | 16 kHz mono PCM, saved every 5 s | pause/resume, wake lock |
-| Process | Whisper large v3 turbo (timestamps) | Inkling (audio-aware), both combined, other STT models |
-| Infer | Clean up with Little (Claude Haiku 5.5) | Summarise, Language feedback, Think it through, custom presets, Big (Claude Sonnet 5.5) |
-| Speak | — | ElevenLabs via OpenRouter, cached locally |
+| Transcribe | Speech to text with timestamps | Whisper large v3 turbo |
+| Listen | An audio-aware model hears the recording (optionally given the transcript) | Inkling |
+| Assist | A Little or Big preset works on the previous step, or all earlier steps | Haiku 5.5 / Sonnet 5.5 |
+
+Each step is set to **Show** (in the session) or **Collapse** (behind the summary
+line). Built-in presets: Thinking aloud (Transcribe → Clean up), Transcribe +
+Inkling (both shown), Language practice (Transcribe → Inkling → Language feedback),
+Transcribe only, and Manual. Read-aloud uses ElevenLabs via OpenRouter, cached locally.
 
 Pipelines inherit default → group → session and are edited inline from the control
 next to the record button. Instructions inherit the same way, plus per-run

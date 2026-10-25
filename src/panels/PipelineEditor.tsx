@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { db, getSettings, updateSettings } from '../lib/db';
 import { newId, now } from '../lib/ids';
 import { pipelineSource, resolvePipeline } from '../lib/instructions';
+import { clonePipeline, normalizePipeline, samePipeline } from '../lib/pipeline';
 import { pipelineCostPerMinute } from '../lib/pipelineInfo';
 import { formatCost } from '../lib/openrouter/catalog';
-import type { Group, PipelineConfig, ProcessMode, Session, Settings } from '../lib/types';
+import type { Group, PipelineConfig, Session, Settings } from '../lib/types';
 import { useCatalog } from '../app/hooks';
-import { Button, Field, Segmented, Toggle, inputClass, toast } from '../ui/primitives';
-import { ModelSelect } from './ModelSelect';
+import { Button, Segmented, toast } from '../ui/primitives';
+import { StepsEditor } from './StepsEditor';
 
 export type Scope = 'session' | 'group' | 'global';
 
@@ -19,7 +20,11 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
   useCatalog();
   const [scope, setScope] = useState<Scope>(initialScope ?? (session ? 'session' : group ? 'group' : 'global'));
   const config =
-    scope === 'session' ? resolvePipeline(settings, group, session) : scope === 'group' ? (group?.pipeline ?? settings.pipeline) : settings.pipeline;
+    scope === 'session'
+      ? resolvePipeline(settings, group, session)
+      : scope === 'group'
+        ? (normalizePipeline(group?.pipeline) ?? settings.pipeline)
+        : settings.pipeline;
   const overridden = scope === 'session' ? !!session?.pipeline : scope === 'group' ? !!group?.pipeline : true;
   const source = pipelineSource(group, session);
 
@@ -29,28 +34,29 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
     else await updateSettings({ pipeline: next });
   };
   // Edits are read-modify-write against the database, so quick successive changes never use a stale copy.
-  const edit = async (change: (c: PipelineConfig) => PipelineConfig) => {
-    const s2 = await getSettings();
-    const g = group ? await db.groups.get(group.id) : undefined;
-    const ses = session ? await db.sessions.get(session.id) : undefined;
-    const fresh = scope === 'session' ? resolvePipeline(s2, g, ses) : scope === 'group' ? (g?.pipeline ?? s2.pipeline) : s2.pipeline;
-    await save(change(fresh));
-  };
+  const change = (fn: (c: PipelineConfig) => PipelineConfig) =>
+    void (async () => {
+      const s2 = await getSettings();
+      const g = group ? await db.groups.get(group.id) : undefined;
+      const ses = session ? await db.sessions.get(session.id) : undefined;
+      const fresh = scope === 'session' ? resolvePipeline(s2, g, ses) : scope === 'group' ? (normalizePipeline(g?.pipeline) ?? s2.pipeline) : s2.pipeline;
+      await save(fn(fresh));
+    })();
   const reset = async () => {
     if (scope === 'session' && session) await db.sessions.update(session.id, { pipeline: null });
     if (scope === 'group' && group) await db.groups.update(group.id, { pipeline: null });
   };
-  const setProcess = (patch: Partial<PipelineConfig['process']>) => void edit((c) => ({ ...c, process: { ...c.process, ...patch } }));
-  const setInfer = (patch: Partial<PipelineConfig['infer']>) => void edit((c) => ({ ...c, infer: { ...c.infer, ...patch } }));
   const { perMinute, unknown } = pipelineCostPerMinute(config, settings);
-  const preset = settings.inferencePresets.find((p) => p.id === config.infer.preset);
-  const matching = settings.pipelinePresets.find((p) => JSON.stringify(p.config) === JSON.stringify(config));
+  const matching = settings.pipelinePresets.find((p) => samePipeline(p.config, config));
 
   const saveAsPreset = async () => {
     const name = prompt('Name this pipeline');
     if (!name?.trim()) return;
     await updateSettings({ pipelinePresets: [...settings.pipelinePresets, { id: newId('pp'), name: name.trim(), config }] });
     toast(`Saved “${name.trim()}”`);
+  };
+  const deletePreset = async (id: string) => {
+    await updateSettings({ pipelinePresets: settings.pipelinePresets.filter((p) => p.id !== id) });
   };
 
   const scopes = [
@@ -75,93 +81,44 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
         <p className="mb-2 text-[13px] font-semibold text-muted">Presets</p>
         <div className="flex flex-wrap gap-2">
           {settings.pipelinePresets.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => void save(p.config)}
-              aria-pressed={matching?.id === p.id}
-              className={`min-h-9 rounded-full border px-3 text-[13px] font-semibold transition ${
-                matching?.id === p.id ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-text'
-              }`}
-            >
-              {p.name}
-            </button>
+            <span key={p.id} className="inline-flex">
+              <button
+                type="button"
+                onClick={() => void save(clonePipeline(p.config))}
+                aria-pressed={matching?.id === p.id}
+                className={`min-h-9 rounded-full border px-3 text-[13px] font-semibold transition ${
+                  matching?.id === p.id ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-text'
+                } ${p.builtin ? '' : 'rounded-r-none border-r-0'}`}
+              >
+                {p.name}
+              </button>
+              {!p.builtin && (
+                <button
+                  type="button"
+                  aria-label={`Delete preset ${p.name}`}
+                  title="Delete preset"
+                  onClick={() => void deletePreset(p.id)}
+                  className="min-h-9 rounded-r-full border border-border px-2 text-[13px] text-faint hover:text-rec"
+                >
+                  ×
+                </button>
+              )}
+            </span>
           ))}
         </div>
       </div>
 
-      <section className="flex flex-col gap-3">
-        <h3 className="text-[15px] font-bold">1. Process the audio</h3>
-        <Segmented<ProcessMode>
-          label="Processing mode"
-          value={config.process.mode}
-          onChange={(mode) => setProcess({ mode })}
-          options={[
-            { value: 'off', label: 'Off' },
-            { value: 'stt', label: 'Transcribe' },
-            { value: 'audio', label: 'Inkling' },
-            { value: 'combined', label: 'Both' },
-          ]}
-        />
-        {config.process.mode === 'audio' || config.process.mode === 'combined' ? (
-          <p className="rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-text">
-            <strong>Inkling hears the audio itself</strong>, so it can notice pronunciation, stress, pauses, hesitation and emphasis — not just the words. Ideal for language practice.
-          </p>
-        ) : null}
-        {(config.process.mode === 'stt' || config.process.mode === 'combined') && (
-          <ModelSelect label="Transcription model" kind="transcription" value={config.process.sttModel} options={settings.sttOptions} onChange={(sttModel) => setProcess({ sttModel })} />
-        )}
-        {(config.process.mode === 'audio' || config.process.mode === 'combined') && (
-          <ModelSelect label="Audio-aware model" kind="chat" requireAudio value={config.process.audioModel} options={settings.audioOptions} onChange={(audioModel) => setProcess({ audioModel })} />
-        )}
-        {config.process.mode === 'combined' && (
-          <Toggle
-            label="Give Inkling the transcript too"
-            description="Helps with names and fast speech. Inkling is told to trust what it hears."
-            checked={config.process.transcriptToAudioModel}
-            onChange={(transcriptToAudioModel) => setProcess({ transcriptToAudioModel })}
-          />
-        )}
-        {config.process.mode !== 'off' && (
-          <Field label="Language" hint="Two-letter code such as en or es. Leave empty to detect automatically.">
-            <input className={inputClass} value={config.process.language} maxLength={5} onChange={(e) => setProcess({ language: e.target.value.trim().toLowerCase() })} placeholder="auto" />
-          </Field>
-        )}
-        {(config.process.mode === 'audio' || config.process.mode === 'combined') && (
-          <Field label="What should Inkling listen for?" hint="Added after the global, group and session instructions.">
-            <textarea className={`${inputClass} min-h-24`} value={config.process.instructions} onChange={(e) => setProcess({ instructions: e.target.value })} />
-          </Field>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h3 className="text-[15px] font-bold">2. Then</h3>
-        <select className={inputClass} value={config.infer.preset} disabled={config.process.mode === 'off'} onChange={(e) => setInfer({ preset: e.target.value })} aria-label="Inference step">
-          <option value="off">Nothing — stop after processing</option>
-          {settings.inferencePresets.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} ({p.tier === 'big' ? 'Big' : 'Little'})
-            </option>
-          ))}
-        </select>
-        {preset && (
-          <>
-            <p className="text-[13px] text-muted">
-              Uses the {preset.tier === 'big' ? 'Big' : 'Little'} model ({settings.models[preset.tier].split('/').pop()}). Change models in Settings.
-            </p>
-            <Field label="Extra instructions for this step">
-              <textarea className={`${inputClass} min-h-20`} value={config.infer.instructions} onChange={(e) => setInfer({ instructions: e.target.value })} />
-            </Field>
-          </>
-        )}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-[15px] font-bold">Steps</h3>
+        <StepsEditor config={config} change={change} settings={settings} />
       </section>
 
       <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[13px]">
         <p>
-          <strong>Estimated cost:</strong> {config.process.mode === 'off' ? 'free (nothing runs)' : unknown ? 'some prices unknown' : `about ${formatCost(perMinute)} per minute of audio`}
+          <strong>Estimated cost:</strong> {config.steps.length === 0 ? 'free (nothing runs)' : unknown ? 'some prices unknown' : `about ${formatCost(perMinute)} per minute of audio`}
         </p>
         <p className="text-muted">
-          Turning steps on approves them for automatic runs. Runs estimated above ${settings.costCeiling.toFixed(2)} wait for your approval.
+          Adding steps approves them for automatic runs. Runs estimated above ${settings.costCeiling.toFixed(2)} wait for your approval.
         </p>
       </div>
 

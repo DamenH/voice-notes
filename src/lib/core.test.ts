@@ -109,3 +109,28 @@ describe('oauth', () => {
     expect(url.searchParams.get('state')).toBe('st');
   });
 });
+
+describe('pipeline helpers', () => {
+  it('converts the old mode-based shape to steps', async () => {
+    const { fromLegacy, samePipeline, clonePipeline } = await import('./pipeline');
+    const p = fromLegacy({
+      process: { mode: 'combined', sttModel: 'w', audioModel: 'i', language: 'es', transcriptToAudioModel: false, instructions: 'listen' },
+      infer: { preset: 'tutor', instructions: 'be kind' },
+    });
+    expect(p.language).toBe('es');
+    expect(p.steps.map((s) => [s.kind, s.model ?? s.preset, s.output])).toEqual([
+      ['transcribe', 'w', 'collapse'],
+      ['listen', 'i', 'collapse'],
+      ['assist', 'tutor', 'show'],
+    ]);
+    expect(p.steps[1].useTranscript).toBe(false);
+    expect(p.steps[1].instructions).toBe('listen');
+    expect(p.steps[2].input).toBe('all');
+    expect(fromLegacy({ process: { mode: 'off', sttModel: 'w', audioModel: 'i' }, infer: { preset: 'cleanup' } }).steps).toEqual([]);
+    expect(samePipeline(p, clonePipeline(p))).toBe(true);
+    // Key order and unset fields don't matter; a real difference does.
+    const reordered = { language: 'es', steps: p.steps.map((s) => Object.fromEntries(Object.entries(s).reverse()) as typeof s) };
+    expect(samePipeline(p, reordered)).toBe(true);
+    expect(samePipeline(p, { ...p, steps: p.steps.map((s, i) => (i === 0 ? { ...s, output: 'show' as const } : s)) })).toBe(false);
+  });
+});

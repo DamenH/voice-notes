@@ -8,9 +8,11 @@ import {
   estimateTranscription,
   isKnown,
 } from './openrouter/catalog';
-import type { Entry, Group, Id, InferencePreset, PipelineConfig, ProcessStep, Run, Session, Settings, SourceRef } from './types';
+import type { Entry, Group, Id, InferencePreset, PipelineConfig, Run, Session, Settings, SourceRef } from './types';
+import { stepProblem } from './pipeline';
 import type { AudioRequest } from './tools';
 import { notifyScheduler, requestAbort } from './scheduler-signal';
+import { INKLING, STT_DEFAULT } from './defaults';
 
 interface Context {
   settings: Settings;
@@ -81,55 +83,63 @@ export async function planPipeline(
   const duration = Number(recording.meta?.duration ?? 0);
   const range = opts.range ?? { start: 0, end: duration };
   const source: SourceRef = { entryId: recording.id, start: range.start, end: range.end };
-  const processInstructions = resolveInstructions('processing', {
-    global: ctx.settings.instructions,
-    group: ctx.group?.instructions,
-    session: ctx.session.instructions,
-    run: [config.process.instructions, opts.extraInstructions].filter(Boolean).join('\n\n'),
-  });
-  const preset = config.infer.preset === 'off' ? undefined : presetById(ctx.settings, config.infer.preset);
-  const p: ProcessStep = config.process;
-  const runs: Run[] = [];
-  let stt: Run | undefined;
-  let audio: Run | undefined;
   const common = { trigger: opts.trigger, sourceRefs: [source] };
-  if (p.mode === 'stt' || p.mode === 'combined') {
-    stt = baseRun(ctx, recording.turnId, {
-      ...common,
-      kind: 'process',
-      mode: 'stt',
-      model: p.sttModel,
-      settings: { language: p.language, primary: !preset && p.mode === 'stt' },
-      instructions: '',
-    });
-    runs.push(stt);
-  }
-  if (p.mode === 'audio' || p.mode === 'combined') {
-    audio = baseRun(ctx, recording.turnId, {
-      ...common,
-      kind: 'process',
-      mode: 'audio',
-      model: p.audioModel,
-      settings: { language: p.language, withTranscript: !!stt && p.transcriptToAudioModel, primary: !preset },
-      instructions: processInstructions,
-      dependsOn: stt && p.transcriptToAudioModel ? [stt.id] : [],
-    });
-    runs.push(audio);
-  }
-  if (preset && runs.length) {
-    runs.push(
-      baseRun(ctx, recording.turnId, {
+  const runs: Run[] = [];
+  // The run each step produced (undefined when a step is skipped as unusable).
+  const byStep: (Run | undefined)[] = [];
+  config.steps.forEach((step, i) => {
+    let run: Run | undefined;
+    const primary = step.output === 'show';
+    if (stepProblem(config.steps, i)) {
+      byStep.push(undefined);
+      return;
+    }
+    if (step.kind === 'transcribe') {
+      run = baseRun(ctx, recording.turnId, {
         ...common,
-        kind: 'infer',
-        mode: preset.id,
-        tier: preset.tier,
-        model: ctx.settings.models[preset.tier],
-        instructions: inferenceInstructions(ctx, preset, config.infer.instructions),
-        dependsOn: runs.map((r) => r.id),
-        settings: { presetName: preset.name },
-      }),
-    );
-  }
+        kind: 'process',
+        mode: 'stt',
+        model: step.model!,
+        settings: { language: config.language, primary, stepId: step.id },
+      });
+    } else if (step.kind === 'listen') {
+      const transcriptRun = step.useTranscript
+        ? [...byStep.slice(0, i)].reverse().find((r) => r?.kind === 'process' && r.mode === 'stt')
+        : undefined;
+      run = baseRun(ctx, recording.turnId, {
+        ...common,
+        kind: 'process',
+        mode: 'audio',
+        model: step.model!,
+        settings: { language: config.language, withTranscript: !!transcriptRun, primary, stepId: step.id },
+        instructions: resolveInstructions('processing', {
+          global: ctx.settings.instructions,
+          group: ctx.group?.instructions,
+          session: ctx.session.instructions,
+          run: [step.instructions, opts.extraInstructions].filter(Boolean).join('\n\n'),
+        }),
+        dependsOn: transcriptRun ? [transcriptRun.id] : [],
+      });
+    } else {
+      const preset = presetById(ctx.settings, step.preset!);
+      const earlier = byStep.slice(0, i).filter((r): r is Run => !!r);
+      const inputs = step.input === 'all' ? earlier : earlier.slice(-1);
+      if (preset && inputs.length) {
+        run = baseRun(ctx, recording.turnId, {
+          ...common,
+          kind: 'infer',
+          mode: preset.id,
+          tier: preset.tier,
+          model: ctx.settings.models[preset.tier],
+          instructions: inferenceInstructions(ctx, preset, step.instructions),
+          dependsOn: inputs.map((r) => r.id),
+          settings: { presetName: preset.name, primary, input: step.input ?? 'previous', stepId: step.id },
+        });
+      }
+    }
+    byStep.push(run);
+    if (run) runs.push(run);
+  });
   let unknownPrices = false;
   for (const r of runs) {
     r.estimatedCost = estimateRun(r, range.end - range.start, ctx.settings);
@@ -181,7 +191,7 @@ export async function runPipelineForRecording(recordingEntryId: Id) {
   if (!recording) return;
   const ctx = await contextFor(recording.sessionId);
   const config = resolvePipeline(ctx.settings, ctx.group, ctx.session);
-  if (config.process.mode === 'off') return;
+  if (config.steps.length === 0) return;
   if (Number(recording.meta?.duration ?? 0) < 0.5) return;
   await submitPlan(await planPipeline(recording, config, { trigger: 'auto' }), recording);
 }
@@ -323,7 +333,11 @@ export async function requestToolProcessing(parent: Run, req: AudioRequest, tool
   const start = req.start ?? 0;
   const end = req.end ?? duration;
   const config = resolvePipeline(ctx.settings, ctx.group, ctx.session);
-  const model = req.mode === 'audio' ? config.process.audioModel : config.process.sttModel;
+  // Use the session's own choice of model for that kind of step, if it has one.
+  const model =
+    req.mode === 'audio'
+      ? (config.steps.find((s) => s.kind === 'listen')?.model ?? ctx.settings.audioOptions[0]?.id ?? INKLING)
+      : (config.steps.find((s) => s.kind === 'transcribe')?.model ?? ctx.settings.sttOptions[0]?.id ?? STT_DEFAULT);
   const run = baseRun(ctx, parent.turnId, {
     kind: 'process',
     mode: req.mode,
@@ -331,7 +345,7 @@ export async function requestToolProcessing(parent: Run, req: AudioRequest, tool
     trigger: 'tool',
     status: 'awaiting_approval',
     sourceRefs: [{ entryId: recording.id, start, end }],
-    settings: { language: config.process.language, primary: false, parentRunId: parent.id },
+    settings: { language: config.language, primary: false, parentRunId: parent.id },
     instructions:
       req.mode === 'audio'
         ? resolveInstructions('processing', {

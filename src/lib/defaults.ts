@@ -1,4 +1,4 @@
-import type { InferencePreset, PipelineConfig, PipelinePreset, Settings } from './types';
+import type { InferencePreset, PipelineConfig, PipelinePreset, PipelineStep, Settings } from './types';
 
 export const STT_DEFAULT = 'openai/whisper-large-v3-turbo';
 export const INKLING = 'thinkingmachines/inkling';
@@ -58,41 +58,45 @@ Keep feedback encouraging and specific. Mark anything uncertain.`,
 
 export const LANGUAGE_PRACTICE_PROCESSING = `The speaker is practising a language they are learning. Focus on pronunciation, stress, intonation and fluency, tied to specific words. Keep it to the few points that matter most for improving.`;
 
+const transcribe = (id: string, output: 'show' | 'collapse'): PipelineStep => ({ id, kind: 'transcribe', model: STT_DEFAULT, instructions: '', output });
+
 export const DEFAULT_PIPELINE: PipelineConfig = {
-  process: { mode: 'stt', sttModel: STT_DEFAULT, audioModel: INKLING, language: '', transcriptToAudioModel: true, instructions: '' },
-  infer: { preset: 'cleanup', instructions: '' },
+  language: '',
+  steps: [
+    transcribe('d-transcribe', 'collapse'),
+    { id: 'd-cleanup', kind: 'assist', preset: 'cleanup', instructions: '', output: 'show', input: 'previous' },
+  ],
 };
 
 export const PIPELINE_PRESETS: PipelinePreset[] = [
   { id: 'thinking-aloud', name: 'Thinking aloud', config: DEFAULT_PIPELINE, builtin: true },
   {
-    id: 'language-practice',
-    name: 'Language practice',
+    id: 'transcribe-inkling',
+    name: 'Transcribe + Inkling',
     config: {
-      process: {
-        mode: 'combined',
-        sttModel: STT_DEFAULT,
-        audioModel: INKLING,
-        language: '',
-        transcriptToAudioModel: true,
-        instructions: LANGUAGE_PRACTICE_PROCESSING,
-      },
-      infer: { preset: 'tutor', instructions: '' },
+      language: '',
+      steps: [
+        transcribe('ti-transcribe', 'show'),
+        { id: 'ti-listen', kind: 'listen', model: INKLING, instructions: '', output: 'show', useTranscript: true },
+      ],
     },
     builtin: true,
   },
   {
-    id: 'transcribe-only',
-    name: 'Transcribe only',
-    config: { ...DEFAULT_PIPELINE, infer: { preset: 'off', instructions: '' } },
+    id: 'language-practice',
+    name: 'Language practice',
+    config: {
+      language: '',
+      steps: [
+        transcribe('lp-transcribe', 'collapse'),
+        { id: 'lp-listen', kind: 'listen', model: INKLING, instructions: LANGUAGE_PRACTICE_PROCESSING, output: 'collapse', useTranscript: true },
+        { id: 'lp-tutor', kind: 'assist', preset: 'tutor', instructions: '', output: 'show', input: 'all' },
+      ],
+    },
     builtin: true,
   },
-  {
-    id: 'manual',
-    name: 'Manual',
-    config: { ...DEFAULT_PIPELINE, process: { ...DEFAULT_PIPELINE.process, mode: 'off' }, infer: { preset: 'off', instructions: '' } },
-    builtin: true,
-  },
+  { id: 'transcribe-only', name: 'Transcribe only', config: { language: '', steps: [transcribe('to-transcribe', 'show')] }, builtin: true },
+  { id: 'manual', name: 'Manual', config: { language: '', steps: [] }, builtin: true },
 ];
 
 export function defaultSettings(): Settings {

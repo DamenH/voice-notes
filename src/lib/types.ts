@@ -12,29 +12,30 @@ export interface InstructionSet {
   inference?: string;
 }
 
-export type ProcessMode = 'off' | 'stt' | 'audio' | 'combined';
+export type StepKind = 'transcribe' | 'listen' | 'assist';
 
-export interface ProcessStep {
-  mode: ProcessMode;
-  sttModel: string;
-  audioModel: string;
-  /** ISO-639-1 code, or empty for auto-detect. */
-  language: string;
-  /** In combined mode, give the audio model the transcript as extra context. */
-  transcriptToAudioModel: boolean;
+/** One step of a pipeline. Runs in order; later steps can use earlier outputs. */
+export interface PipelineStep {
+  id: string;
+  kind: StepKind;
+  /** transcribe: speech-to-text model; listen: audio-aware model. Assist uses its preset's tier. */
+  model?: string;
+  /** assist: inference preset id. */
+  preset?: string;
   /** Step-specific instructions, applied at the run level of the chain. */
   instructions: string;
-}
-
-export interface InferStep {
-  /** Inference preset id, or 'off'. */
-  preset: string;
-  instructions: string;
+  /** 'show' puts the output in the session; 'collapse' keeps it behind the turn's summary line. */
+  output: 'show' | 'collapse';
+  /** listen: also give the model the transcript from the nearest earlier Transcribe step. */
+  useTranscript?: boolean;
+  /** assist: read the previous step's output, or all earlier outputs. */
+  input?: 'previous' | 'all';
 }
 
 export interface PipelineConfig {
-  process: ProcessStep;
-  infer: InferStep;
+  /** ISO-639-1 code for transcription and listening, or empty for auto-detect. */
+  language: string;
+  steps: PipelineStep[];
 }
 
 export type Tier = 'little' | 'big';

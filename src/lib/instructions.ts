@@ -1,3 +1,4 @@
+import { normalizePipeline } from './pipeline';
 import type { Group, InstructionSet, PipelineConfig, Session, Settings, TtsSettings } from './types';
 
 export type Chain = 'processing' | 'inference';
@@ -33,7 +34,7 @@ export function resolveInstructions(chain: Chain, sources: InstructionSources): 
 }
 
 export function resolvePipeline(settings: Settings, group?: Group | null, session?: Session | null): PipelineConfig {
-  return session?.pipeline ?? group?.pipeline ?? settings.pipeline;
+  return normalizePipeline(session?.pipeline) ?? normalizePipeline(group?.pipeline) ?? settings.pipeline;
 }
 
 export function pipelineSource(group?: Group | null, session?: Session | null): 'session' | 'group' | 'global' {

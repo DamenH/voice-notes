@@ -62,9 +62,22 @@ export interface MenuItem {
 }
 
 /** Overflow menu: secondary actions live here instead of as always-visible buttons. */
-export function Menu({ items, label = 'More actions', icon = 'more' as IconName, className = '' }: { items: MenuItem[]; label?: string; icon?: IconName; className?: string }) {
+export function Menu({
+  items,
+  label = 'More actions',
+  icon = 'more' as IconName,
+  className = '',
+  text,
+}: {
+  items: MenuItem[];
+  label?: string;
+  icon?: IconName;
+  className?: string;
+  /** Show a text button instead of an icon-only one. */
+  text?: string;
+}) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; up: boolean }>({ top: 0, left: 0, up: false });
+  const [pos, setPos] = useState<{ top: number; left: number; up: boolean; fromLeft: boolean }>({ top: 0, left: 0, up: false, fromLeft: false });
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
 
@@ -86,19 +99,35 @@ export function Menu({ items, label = 'More actions', icon = 'more' as IconName,
   const toggle = () => {
     const r = btn.current!.getBoundingClientRect();
     const up = r.bottom > window.innerHeight - 260;
-    setPos({ top: up ? r.top : r.bottom, left: Math.min(r.right, window.innerWidth - 8), up });
+    // Open towards the side with room: right-aligned by default, left-aligned near the left edge.
+    const fromLeft = r.right < 220;
+    setPos({ top: up ? r.top : r.bottom, left: fromLeft ? Math.max(8, r.left) : Math.min(r.right, window.innerWidth - 8), up, fromLeft });
     setOpen((o) => !o);
   };
 
   return (
     <>
-      <IconButton ref={btn} icon={icon} label={label} aria-haspopup="menu" aria-expanded={open} onClick={toggle} className={className} />
+      {text ? (
+        <button
+          ref={btn}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+          className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition pointer-fine:min-h-9 ${className}`}
+        >
+          <Icon name={icon} size={18} />
+          {text}
+        </button>
+      ) : (
+        <IconButton ref={btn} icon={icon} label={label} aria-haspopup="menu" aria-expanded={open} onClick={toggle} className={className} />
+      )}
       {open &&
         createPortal(
           <div
             ref={menu}
             role="menu"
-            className="animate-fade fixed z-50 min-w-48 -translate-x-full overflow-hidden rounded-xl border border-hairline bg-surface py-1 shadow-xl"
+            className={`animate-fade fixed z-50 min-w-48 overflow-hidden ${pos.fromLeft ? '' : '-translate-x-full'} rounded-xl border border-hairline bg-surface py-1 shadow-xl`}
             style={{ left: pos.left, ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
           >
             {items.map((it) => (

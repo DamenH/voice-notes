@@ -136,13 +136,13 @@ function PipelineChip({ session, group, settings }: { session: Session; group?: 
     >
       <Icon name="bolt" size={14} className="text-accent" />
       <span className="font-semibold text-text">Stop</span>
-      {steps.map((s) => (
-        <span key={s} className="flex items-center gap-1.5">
+      {steps.map((s, i) => (
+        <span key={i} className="flex items-center gap-1.5">
           <Icon name="chevron" size={12} className="text-faint" />
           {s}
         </span>
       ))}
-      {config.process.mode !== 'off' && (
+      {config.steps.length > 0 && (
         <span className="text-faint">· {unknown ? 'price unknown' : `~${formatCost(perMinute)}/min`}</span>
       )}
       {source !== 'session' && <span className="hidden text-faint sm:inline">· {source === 'group' ? 'group default' : 'default'}</span>}

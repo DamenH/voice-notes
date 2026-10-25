@@ -141,4 +141,5 @@ notes and merged them into the "cleaned transcript".
 | --- | --- | --- |
 | 2026-10-25 | Fixtures (TTS), transcription, Inkling, cleanup probes | < $0.01 |
 | 2026-10-25 | Live smoke runs (3, including one failed and re-run) | ≈ $0.05 |
-| | **Total on the dev key** | **≈ $0.05 of the $5 cap** |
+| 2026-10-25 | Live smoke run after the step-list pipeline change | ≈ $0.023 |
+| | **Total on the dev key** | **≈ $0.09 of the $5 cap** |
