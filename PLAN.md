@@ -49,10 +49,23 @@ what happens automatically when a recording stops.
 - The pipeline is shown as a compact control beside the record button, e.g.
   `Stop → Transcribe → Clean up`. Tapping it opens the session's pipeline editor
   inline rather than in a separate settings page.
-- Each step can be on or off and has its own mode, model, and instructions:
-  - **Process:** off, speech to text, audio-aware, or combined.
-  - **Infer:** off, cleanup (Little), or a saved inference preset such as
-    summarize, tutor feedback, or a custom prompt (Little or Big).
+- A pipeline is an ordered list of steps (up to five), edited with
+  "+ Add step", remove and reorder. Each step has its own model and instructions.
+  There are three step types:
+  - **Transcribe:** a speech-to-text model on the audio.
+  - **Listen:** an audio-aware model (Inkling by default) on the audio,
+    optionally given the transcript from an earlier Transcribe step.
+  - **Assist:** a Little or Big inference preset (cleanup, summarise, tutor
+    feedback, custom). It reads the previous step's output by default; a toggle
+    switches it to all earlier outputs. Assist steps can therefore chain, e.g.
+    Clean up → Summarise.
+- Each step has one output setting: **Show** (appears in the session) or
+  **Collapse** (behind the turn's summary line). By default the last step is shown
+  and earlier steps are collapsed. Shown outputs appear in step order.
+- Named presets are saved step lists; for example "Transcribe (Show) → Listen with
+  Inkling (Show)" shows the Whisper transcript and Inkling's notes side by side.
+  Pipelines saved in the earlier mode-based form are converted automatically
+  (e.g. "combined" becomes a Transcribe step followed by a Listen step).
 - Pipelines inherit like instructions: global default → group → session. A new
   session starts from its group's pipeline. Users can save named pipeline presets
   (e.g. "Thinking aloud", "Language practice") and switch per session.
@@ -462,3 +475,12 @@ https://damenh.github.io/voice-notes/.
 
 Provider details and browser behavior are validated during implementation; model
 presets and endpoint constraints remain configurable as they evolve.
+
+## Decisions deferred (2026-10-25)
+
+- **Opus audio compression:** skipped for now. The development machine has
+  ~394 GB free (over 3,000 hours at 115 MB/hour). Revisit if a phone or a
+  small-quota browser runs short.
+- **WebMCP:** not now. Revisit when the spec stabilises and browser agents
+  actually call page tools; it would start as an opt-in, read-only setting that
+  exposes the existing group-scoped search and read tools.
