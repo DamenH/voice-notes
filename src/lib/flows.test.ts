@@ -9,7 +9,6 @@ import { executeTool } from './tools';
 import { exportLibrary, importLibrary } from './backup';
 import { readPcm } from './audio/store';
 import { setCatalogForTests } from './openrouter/catalog';
-import { PIPELINE_PRESETS } from './defaults';
 import { step } from './pipeline';
 import type { PipelineConfig, PipelineStep } from './types';
 
@@ -238,20 +237,19 @@ describe('agent tools', () => {
     await createEntry({ sessionId: earlier.id, groupId: group.id, kind: 'transcript', text: 'Street space is a shared resource.', status: 'done', visibility: 'primary' });
     const session = await createSession(group.id, 'Now');
     let step = 0;
-    const calls = mockOpenRouter((path, body) => {
+    const calls = mockOpenRouter((path) => {
       if (path === 'audio/transcriptions') return json(WHISPER_RESPONSE);
-      if (body.model === 'thinkingmachines/inkling') return textStream('Hesitation at 0:01.');
       step++;
       if (step === 1) return toolCallStream('call_1', 'search_group', { query: 'shared resource' });
-      if (step === 2) return toolCallStream('call_2', 'request_audio_processing', { recording_entry_id: recording.id, start: 0, end: 5, mode: 'audio', instructions: 'Listen for hesitation.' });
+      if (step === 2) return toolCallStream('call_2', 'request_audio_processing', { recording_entry_id: recording.id, start: 0, end: 5, instructions: 'Check the first words.' });
       return textStream('You said street space is shared [earlier]. Inkling heard hesitation at 0:01.');
     });
     const { run } = await sendMessage(session.id, 'What did I say before, and did I hesitate?', 'big');
     const approval = await waitFor(async () => (await db.entries.where('turnId').equals(run.turnId).toArray()).find((e) => e.kind === 'approval_request'));
     expect((await db.runs.get(run.id))!.status).toBe('awaiting_approval');
-    expect(approval.meta?.model).toBe('thinkingmachines/inkling');
+    expect(approval.meta?.model).toBe(WHISPER);
     expect(approval.meta?.end).toBe(5);
-    expect(calls.filter((c) => c.body.model === 'thinkingmachines/inkling').length).toBe(0);
+    expect(calls.filter((c) => c.path === 'audio/transcriptions').length).toBe(0);
     await resolveApproval(approval.id, true);
     await waitFor(async () => (await db.runs.get(run.id))!.status === 'done');
     const out = (await db.entries.where('runId').equals(run.id).toArray()).find((e) => e.kind === 'inference')!;
@@ -264,7 +262,7 @@ describe('agent tools', () => {
     const last = calls.at(-1)!;
     const msgs = last.body.messages as { role: string; content: string }[];
     expect(msgs.filter((m) => m.role === 'tool').length).toBe(2);
-    expect(msgs.find((m) => m.role === 'tool' && m.content.includes('Hesitation'))).toBeTruthy();
+    expect(msgs.find((m) => m.role === 'tool' && m.content.includes('Okay, so for the essay'))).toBeTruthy();
   });
 
   it('resumes with the refusal when the user declines', async () => {
@@ -372,7 +370,7 @@ describe('long recordings', () => {
       return textStream('ok');
     });
     const { entry } = await seedRecording(samples, rate);
-    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' })));
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show', skipSilence: false })));
     const [run] = await settled(entry.turnId, 30000);
     expect(run.status).toBe('done');
     const segs = await db.segments.where('runId').equals(run.id).sortBy('index');
@@ -442,11 +440,9 @@ describe('fixes from review', () => {
       ['assist', 'show'],
     ]);
     expect(migrated.pipeline.language).toBe('es');
-    const lp = migrated.pipelinePresets.find((p) => p.id === 'language-practice')!.config;
-    expect(lp.steps.map((x) => x.kind)).toEqual(['transcribe', 'listen', 'assist']);
-    expect(lp.steps[1].instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
-    expect(lp.steps[2].input).toBe('all');
-    expect(migrated.pipelinePresets.some((p) => p.id === 'transcribe-inkling')).toBe(true);
+    // v5: the built-in Inkling presets are gone; others remain (converted to steps).
+    expect(migrated.pipelinePresets.map((p) => p.id)).toEqual(['thinking-aloud']);
+    expect(migrated.pipelinePresets[0].config.steps.map((x) => x.kind)).toEqual(['transcribe', 'assist']);
     const session = (await db3.sessions.get('s1'))!;
     expect(session.instructions.processing).toBe('My own words.');
     // Combined without assistance: transcript collapsed, Inkling's notes shown, as before.
@@ -502,12 +498,14 @@ describe('multi-step pipelines', () => {
     expect(JSON.stringify(calls[0].body.messages)).toContain('Start with a verbatim transcript');
   });
 
-  it('the Transcribe + Inkling preset shows both outputs side by side', async () => {
+  it('a Transcribe + Listen pipeline shows both outputs in step order', async () => {
     mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('- hesitation on "um"')));
     const { entry } = await seedRecording();
-    await processRecording(entry.id, PIPELINE_PRESETS.find((p) => p.id === 'transcribe-inkling')!.config);
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' }), step('listen', { model: INK, output: 'show' })));
     await settled(entry.turnId);
-    const shown = (await db.entries.where('turnId').equals(entry.turnId).sortBy('createdAt')).filter((e) => e.visibility === 'primary' && e.id !== entry.id);
+    const { byStepOrder } = await import('./pipelineInfo');
+    const runs = await db.runs.where('turnId').equals(entry.turnId).toArray();
+    const shown = byStepOrder((await db.entries.where('turnId').equals(entry.turnId).toArray()).filter((e) => e.visibility === 'primary' && e.id !== entry.id), runs);
     expect(shown.map((e) => e.kind)).toEqual(['transcript', 'audio_notes']);
   });
 
@@ -549,10 +547,10 @@ describe('listening writes its own transcript (v4)', () => {
     db4.close();
   });
 
-  it('Transcribe + Inkling runs both independently; Inkling is asked for its own transcript', async () => {
+  it('Transcribe + Listen run independently; the listener is asked for its own transcript', async () => {
     const calls = mockOpenRouter((path) => (path === 'audio/transcriptions' ? json({ ...WHISPER_RESPONSE, text: '. Test 1, 2, 3.' }) : textStream('Test one, two, three.')));
     const { entry } = await seedRecording();
-    await processRecording(entry.id, PIPELINE_PRESETS.find((p) => p.id === 'transcribe-inkling')!.config);
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' }), step('listen', { model: INK, output: 'show' })));
     const runs = await settled(entry.turnId);
     expect(runs.find((r) => r.mode === 'audio')!.dependsOn).toEqual([]);
     const inkling = calls.find((c) => c.body.model === INK)!;
@@ -611,5 +609,93 @@ describe('session export', () => {
     const audio = await exportSession(session.id, 'audio');
     expect(audio.filename).toBe('bike-lanes-audio.zip');
     expect(Object.keys(unzipSync(new Uint8Array(await audio.blob.arrayBuffer())))).toEqual(['bike-lanes-01.wav', 'bike-lanes-02-second-take.wav']);
+  });
+});
+
+describe('skipping silence before transcription', () => {
+  async function speechWithHiss(seconds: number, bursts: number[]) {
+    const { resample } = await import('./audio/pcm');
+    const { fixture } = await import('../test/helpers');
+    const f = fixture('thinking-aloud-en.wav');
+    const speech = resample(f.samples, f.sampleRate, 16000);
+    const out = new Int16Array(16000 * seconds);
+    // Quiet room hiss (about -50 dBFS).
+    for (let i = 0; i < out.length; i++) out[i] = ((i * 7919) % 200) - 100;
+    for (const at of bursts) out.set(speech, at * 16000);
+    return { samples: out, speechLength: speech.length / 16000 };
+  }
+
+  it('sends only the speech from a long, mostly quiet recording and maps timestamps back', async () => {
+    const { samples, speechLength } = await speechWithHiss(600, [60, 300, 540]);
+    const sizes: number[] = [];
+    mockOpenRouter((path, body) => {
+      if (path !== 'audio/transcriptions') return textStream('ok');
+      sizes.push(atob((body.input_audio as { data: string }).data).length);
+      // Timestamps are in the joined audio: one in the first and one in the second burst.
+      return json({ text: 'one two', segments: [{ start: 1, end: 2, text: 'one' }, { start: speechLength + 2, end: speechLength + 3, text: 'two' }], usage: { cost: 0.0002 } });
+    });
+    const { entry } = await seedRecording(samples, 16000);
+    await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' })));
+    const [run] = await settled(entry.turnId, 30000);
+    expect(run.status).toBe('done');
+    expect(sizes.length).toBe(1);
+    const sentSeconds = (sizes[0] - 44) / 2 / 16000;
+    // Three ~18 s bursts plus padding, not ten minutes.
+    expect(sentSeconds).toBeGreaterThan(3 * speechLength);
+    expect(sentSeconds).toBeLessThan(3 * speechLength + 10);
+    const transcript = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(transcript.timestamps![0].start).toBeGreaterThan(60);
+    expect(transcript.timestamps![0].start).toBeLessThan(61.5);
+    expect(transcript.timestamps![1].start).toBeGreaterThan(300);
+    expect(transcript.timestamps![1].start).toBeLessThan(302);
+    expect(transcript.meta?.totalSeconds).toBe(600);
+    expect(Number(transcript.meta?.speechSeconds)).toBeLessThan(70);
+  }, 60000);
+
+  it('makes no request when nothing was said', async () => {
+    const { samples } = await speechWithHiss(120, []);
+    const calls = mockOpenRouter(() => json(WHISPER_RESPONSE));
+    const { entry } = await seedRecording(samples, 16000);
+    await runPipelineForRecording(entry.id);
+    const runs = await settled(entry.turnId, 30000);
+    expect(calls.filter((c) => c.path === 'audio/transcriptions').length).toBe(0);
+    const transcript = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(transcript.text).toBe('No speech detected.');
+    expect(runs[0].status).toBe('done');
+  }, 60000);
+});
+
+describe('record now, process later', () => {
+  it('waits on stop, then processes every take and runs one batch step across them', async () => {
+    const { waitingRecordings, processWaiting } = await import('./runs');
+    const calls = mockOpenRouter((path, body) => {
+      if (path === 'audio/transcriptions') return json(WHISPER_RESPONSE);
+      const sys = JSON.stringify((body.messages as unknown[])[0]);
+      return textStream(sys.includes('Summarise') ? 'Across both takes: bike lanes.' : 'Cleaned take.');
+    });
+    const first = await seedRecording();
+    const second = await createEntry({ sessionId: first.session.id, groupId: first.group.id, kind: 'recording', text: '', title: 'Recording', status: 'done', visibility: 'primary', meta: { recordingId: first.recordingId, duration: first.duration } });
+    await db.sessions.update(first.session.id, {
+      pipeline: { language: '', trigger: 'request', batchPreset: 'summarize', steps: [step('transcribe', { model: WHISPER }), step('assist', { preset: 'cleanup', output: 'show' })] },
+    });
+    await runPipelineForRecording(first.entry.id);
+    await runPipelineForRecording(second.id);
+    expect(calls.length).toBe(0);
+    expect((await waitingRecordings(first.session.id)).length).toBe(2);
+
+    const { recordings, batchRunId } = await processWaiting(first.session.id);
+    expect(recordings).toBe(2);
+    const batch = await waitFor(async () => {
+      const r = await db.runs.get(batchRunId!);
+      return r?.status === 'done' && r;
+    }, 15000);
+    expect(batch.dependsOn.length).toBe(2);
+    const out = (await db.entries.where('runId').equals(batch.id).toArray())[0];
+    expect(out.text).toBe('Across both takes: bike lanes.');
+    expect(out.visibility).toBe('primary');
+    // The batch request saw both cleaned takes.
+    const sent = JSON.stringify(calls.at(-1)!.body.messages);
+    expect(sent.match(/Cleaned take\./g)?.length).toBe(2);
+    expect((await waitingRecordings(first.session.id)).length).toBe(0);
   });
 });

@@ -32,6 +32,25 @@ export async function rangeWav(recordingId: string, start: number, end: number):
   return wavBlob([pcm.buffer as ArrayBuffer], pcm.byteLength, rec?.sampleRate ?? SAMPLE_RATE);
 }
 
+/** Several ranges of a recording joined with short silent gaps, as one WAV (for speech-only requests). */
+export async function regionsWav(recordingId: string, regions: { start: number; end: number }[], gapSeconds: number): Promise<Blob> {
+  const rec = await db.recordings.get(recordingId);
+  const rate = rec?.sampleRate ?? SAMPLE_RATE;
+  const gap = new Int16Array(Math.round(gapSeconds * rate));
+  const parts: ArrayBuffer[] = [];
+  let bytes = 0;
+  for (const [i, r] of regions.entries()) {
+    if (i > 0) {
+      parts.push(gap.buffer.slice(0) as ArrayBuffer);
+      bytes += gap.byteLength;
+    }
+    const pcm = await readPcm(recordingId, r.start, r.end);
+    parts.push(pcm.buffer as ArrayBuffer);
+    bytes += pcm.byteLength;
+  }
+  return wavBlob(parts, bytes, rate);
+}
+
 /** Full recording as a WAV blob built from stored chunk blobs (not copied into memory). */
 export async function recordingWav(recordingId: string): Promise<Blob> {
   const rec = await db.recordings.get(recordingId);

@@ -3,7 +3,8 @@ import { newId, now } from './ids';
 import { createEntry } from './library';
 import { blobToBase64, formatTime } from './audio/pcm';
 import { assembleTimed, planSegments } from './audio/segments';
-import { energyReader, rangeWav } from './audio/store';
+import { energyReader, rangeWav, readPcm, regionsWav } from './audio/store';
+import { JOIN_GAP, detectSpeech, frameLevels, packRegions, speechSeconds, toRecordingTime } from './audio/speech';
 import { OpenRouterError, chat, transcribe } from './openrouter/client';
 import type { Run, Segment, TimedText, Usage } from './types';
 
@@ -40,16 +41,26 @@ async function ensureSegments(run: Run, segmentSeconds: number): Promise<Segment
   const existing = await db.segments.where('runId').equals(run.id).sortBy('index');
   if (existing.length) return existing;
   const { rec, start, end } = await recordingFor(run);
-  const ranges = await planSegments({ start, end }, segmentSeconds, energyReader(rec.id));
-  const segments: Segment[] = ranges.map((r, index) => ({
-    id: newId('seg'),
-    runId: run.id,
-    index,
-    start: r.start,
-    end: r.end,
-    status: 'pending',
-    attempts: 0,
-  }));
+  const energy = energyReader(rec.id);
+  let segments: Segment[];
+  if (run.mode === 'stt' && run.settings.skipSilence !== false) {
+    // Send only the speech: long, mostly quiet recordings cost what was said, not how long they ran.
+    const levels = await frameLevels((a, b) => readPcm(rec.id, a, b), rec.sampleRate, start, end);
+    const groups = await packRegions(detectSpeech(levels, start), segmentSeconds, energy);
+    segments = groups.map((regions, index) => ({
+      id: newId('seg'),
+      runId: run.id,
+      index,
+      start: regions[0].start,
+      end: regions.at(-1)!.end,
+      regions,
+      status: 'pending',
+      attempts: 0,
+    }));
+  } else {
+    const ranges = await planSegments({ start, end }, segmentSeconds, energy);
+    segments = ranges.map((r, index) => ({ id: newId('seg'), runId: run.id, index, start: r.start, end: r.end, status: 'pending', attempts: 0 }));
+  }
   await db.segments.bulkAdd(segments);
   return segments;
 }
@@ -88,7 +99,7 @@ export async function executeProcessRun(run: Run, segmentSeconds: number, signal
     signal.throwIfAborted();
     await db.segments.update(seg.id, { status: 'requesting', attempts: seg.attempts + 1 });
     try {
-      const wav = await rangeWav(rec.id, seg.start, seg.end);
+      const wav = seg.regions ? await regionsWav(rec.id, seg.regions, JOIN_GAP) : await rangeWav(rec.id, seg.start, seg.end);
       const data = await blobToBase64(wav);
       let text: string;
       let timestamps: TimedText[] | undefined;
@@ -145,15 +156,29 @@ export async function executeProcessRun(run: Run, segmentSeconds: number, signal
   }
 
   const done = await db.segments.where('runId').equals(run.id).sortBy('index');
+  const ref = run.sourceRefs[0];
+  const recordedEnd = (ref?.end ?? recording.meta?.duration ?? 0) as number;
+  const sent = done.reduce((n, sg) => n + (sg.regions ? speechSeconds(sg.regions) : sg.end - sg.start), 0);
   const assembled =
     run.mode === 'stt'
-      ? assembleTimed(done.map((s) => ({ offset: s.start, text: s.text ?? '', timestamps: s.timestamps })))
+      ? done.length === 0
+        ? { text: 'No speech detected.', timestamps: [] }
+        : assembleTimed(
+            done.map((sg) =>
+              sg.regions
+                ? {
+                    offset: 0,
+                    text: sg.text ?? '',
+                    timestamps: sg.timestamps?.map((t) => ({ start: toRecordingTime(sg.regions!, t.start), end: toRecordingTime(sg.regions!, t.end), text: t.text })),
+                  }
+                : { offset: sg.start, text: sg.text ?? '', timestamps: sg.timestamps },
+            ),
+          )
       : {
           text: done
             .map((s) => (done.length > 1 ? `**${formatTime(s.start)}–${formatTime(s.end)}**\n\n${s.text ?? ''}` : (s.text ?? '')))
             .join('\n\n'),
         };
-  const ref = run.sourceRefs[0];
   const output = await createEntry({
     sessionId: run.sessionId,
     groupId: run.groupId,
@@ -166,7 +191,11 @@ export async function executeProcessRun(run: Run, segmentSeconds: number, signal
     status: 'done',
     visibility: run.settings.primary ? 'primary' : 'detail',
     sourceRefs: [{ entryId: recording.id, start: ref?.start, end: ref?.end }],
-    meta: { model: run.model, segments: done.length },
+    meta: {
+      model: run.model,
+      segments: done.length,
+      ...(done.some((sg) => sg.regions) || done.length === 0 ? { speechSeconds: Math.round(sent), totalSeconds: Math.round(recordedEnd - (ref?.start ?? 0)) } : {}),
+    },
   });
   await db.runs.update(run.id, { outputEntryIds: [output.id] });
 }

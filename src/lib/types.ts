@@ -30,12 +30,18 @@ export interface PipelineStep {
   useTranscript?: boolean;
   /** assist: read the previous step's output, or all earlier outputs. */
   input?: 'previous' | 'all';
+  /** transcribe: send only the parts with speech (default on). */
+  skipSilence?: boolean;
 }
 
 export interface PipelineConfig {
   /** ISO-639-1 code for transcription and listening, or empty for auto-detect. */
   language: string;
   steps: PipelineStep[];
+  /** When the pipeline runs: as soon as a recording stops (default), or when asked. */
+  trigger?: 'stop' | 'request';
+  /** With trigger 'request': an optional Assist preset run once over the whole batch. */
+  batchPreset?: string | null;
 }
 
 export type Tier = 'little' | 'big';
@@ -252,8 +258,11 @@ export interface Segment {
   id: Id;
   runId: Id;
   index: number;
+  /** Recording time covered (first speech start to last speech end when silence is skipped). */
   start: number;
   end: number;
+  /** When silence is skipped: the speech regions sent, joined with short gaps. */
+  regions?: { start: number; end: number }[];
   status: SegmentStatus;
   attempts: number;
   text?: string;

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { recorder } from '../lib/audio/recorder';
 import { formatTime } from '../lib/audio/pcm';
-import { runPipelineForRecording, sendMessage } from '../lib/runs';
+import { processWaiting, runPipelineForRecording, sendMessage, waitingRecordings } from '../lib/runs';
+import { db } from '../lib/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { pipelineSource, resolvePipeline } from '../lib/instructions';
 import { pipelineCostPerMinute, pipelineSteps } from '../lib/pipelineInfo';
 import { formatCost } from '../lib/openrouter/catalog';
@@ -10,7 +12,7 @@ import type { Group, Session, Settings, Tier } from '../lib/types';
 import { useApiKey, useCatalog, useOnline, useRecorder } from '../app/hooks';
 import { openPanel } from '../app/stores';
 import { Icon } from '../ui/Icon';
-import { Segmented, toast } from '../ui/primitives';
+import { Button, Segmented, toast } from '../ui/primitives';
 
 export function Dock({ session, group, settings }: { session: Session; group?: Group; settings: Settings }) {
   const rec = useRecorder();
@@ -24,6 +26,7 @@ export function Dock({ session, group, settings }: { session: Session; group?: G
           {rec.warning}
         </p>
       )}
+      {!recordingHere && <WaitingBar session={session} group={group} settings={settings} />}
       {recordingHere ? (
         <RecordingBar />
       ) : (
@@ -127,15 +130,16 @@ function PipelineChip({ session, group, settings }: { session: Session; group?: 
   const steps = pipelineSteps(config, settings);
   const { perMinute, unknown } = pipelineCostPerMinute(config, settings);
   const source = pipelineSource(group, session);
+  const later = config.trigger === 'request';
   return (
     <button
       type="button"
       onClick={() => openPanel({ kind: 'pipeline' })}
       className="flex min-h-9 items-center gap-1.5 self-start rounded-full px-2.5 text-[13px] text-muted transition hover:bg-surface-2 hover:text-text"
-      aria-label={`On stop: ${steps.join(', then ')}. Change pipeline`}
+      aria-label={`${later ? 'When asked' : 'On stop'}: ${steps.join(', then ')}. Change pipeline`}
     >
       <Icon name="bolt" size={14} className="text-accent" />
-      <span className="font-semibold text-text">Stop</span>
+      <span className="font-semibold text-text">{later ? 'Later' : 'Stop'}</span>
       {steps.map((s, i) => (
         <span key={i} className="flex items-center gap-1.5">
           <Icon name="chevron" size={12} className="text-faint" />
@@ -216,6 +220,45 @@ function Composer({ session, disabled }: { session: Session; disabled: boolean }
           <Icon name="send" size={18} strokeWidth={2.2} />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** With "When I ask", recordings collect here until processed together. */
+function WaitingBar({ session, group, settings }: { session: Session; group?: Group; settings: Settings }) {
+  const config = resolvePipeline(settings, group, session);
+  const entries = useLiveQuery(() => db.entries.where('sessionId').equals(session.id).count(), [session.id]);
+  const runs = useLiveQuery(() => db.runs.where('sessionId').equals(session.id).count(), [session.id]);
+  const waiting = useLiveQuery(() => waitingRecordings(session.id), [session.id, entries, runs]) ?? [];
+  const [busy, setBusy] = useState(false);
+  if (config.trigger !== 'request' || config.steps.length === 0 || waiting.length === 0) return null;
+  const batch = config.batchPreset ? settings.inferencePresets.find((p) => p.id === config.batchPreset) : undefined;
+  const go = async () => {
+    setBusy(true);
+    try {
+      await processWaiting(session.id);
+    } catch (e) {
+      toast(friendlyError(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent-soft px-3 py-2" role="status">
+      <Icon name="wave" size={18} className="text-accent" />
+      <span className="flex-1 text-[14px]">
+        <strong>
+          {waiting.length} recording{waiting.length === 1 ? '' : 's'} waiting
+        </strong>
+        <span className="text-muted">
+          {' '}
+          · {pipelineSteps(config, settings).join(' → ')}
+          {batch ? `, then ${batch.name.toLowerCase()} across all` : ''}
+        </span>
+      </span>
+      <Button small variant="primary" disabled={busy} onClick={() => void go()}>
+        Process now
+      </Button>
     </div>
   );
 }

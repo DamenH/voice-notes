@@ -41,19 +41,18 @@ test('record, stop, and get a cleaned transcript automatically', async ({ page }
   await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible();
 });
 
-test('pipeline control opens inline and switches to Inkling', async ({ page }, info) => {
+test('pipeline control opens inline and switches presets', async ({ page }, info) => {
   await setup(page);
   await page.goto('./');
   await page.getByRole('button', { name: /start a session/i }).click();
   await page.getByRole('button', { name: /On stop: Transcribe, then Clean up/ }).click();
   await expect(page.getByRole('heading', { name: 'Steps' })).toBeVisible();
-  await page.getByRole('button', { name: 'Language practice' }).click();
-  await expect(page.getByText('Inkling hears the audio itself')).toBeVisible();
+  await page.getByRole('button', { name: 'Transcribe only' }).click();
+  await expect(page.getByRole('switch', { name: /Skip silence/ })).toBeChecked();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `test-results/shots/${info.project.name}-05-pipeline.png` });
-  if (info.project.name === 'mobile') await page.getByRole('button', { name: 'Close' }).click();
-  else await page.getByRole('button', { name: 'Close panel' }).click();
-  await expect(page.getByRole('button', { name: /On stop: Transcribe, then Inkling, then Language feedback/ })).toBeVisible();
+  await closePanel(page, info.project.name);
+  await expect(page.getByRole('button', { name: /On stop: Transcribe\. Change pipeline/ })).toBeVisible();
 });
 
 test('failures stay visible and retry resumes', async ({ page }) => {
@@ -81,35 +80,53 @@ test('chat with Big uses the composer', async ({ page }) => {
   await expect(page.getByText('Where should I start?')).toBeVisible();
 });
 
-test('build a pipeline with Add step and see both outputs', async ({ page }, info) => {
-  await setup(page, { chat: () => '- Hesitation before "bike lanes" (unsure)' });
+test('build a pipeline with Add step', async ({ page }, info) => {
+  await setup(page);
   await page.goto('./');
   await page.getByRole('button', { name: /start a session/i }).click();
   await page.getByRole('button', { name: /On stop:/ }).click();
   await page.getByRole('button', { name: 'Transcribe only' }).click();
   await page.getByRole('button', { name: 'Add step' }).click();
-  await page.getByRole('menuitem', { name: 'Listen (Inkling)' }).click();
-  const transcribe = page.getByRole('listitem', { name: /Step 1: Transcribe/ });
-  // Adding a step folds earlier ones; show the transcript too.
-  await transcribe.getByRole('radio', { name: 'Show' }).click();
-  // Inkling writes its own transcript by default.
-  await expect(page.getByRole('listitem', { name: /Step 2: Inkling/ }).getByRole('switch', { name: /Give it the earlier transcript/ })).not.toBeChecked();
-  // The hand-built pipeline is recognised as the matching preset.
-  await expect(page.getByRole('button', { name: 'Transcribe + Inkling', pressed: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Listen/ })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Assist' }).click();
+  // Transcribe (collapsed) → Clean up (shown) is exactly the Thinking aloud preset.
+  await expect(page.getByRole('button', { name: 'Thinking aloud', pressed: true })).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: `test-results/shots/${info.project.name}-06-steps.png` });
-  if (info.project.name === 'mobile') await page.getByRole('button', { name: 'Close' }).click();
-  else await page.getByRole('button', { name: 'Close panel' }).click();
-  await expect(page.getByRole('button', { name: /On stop: Transcribe, then Inkling\./ })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Start recording' }).click();
-  await page.waitForTimeout(1500);
-  await page.getByRole('button', { name: 'Stop recording' }).click();
-  await expect(page.locator('article').filter({ hasText: 'Hesitation before' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('article').filter({ hasText: 'cities should invest in bike lanes' })).toBeVisible();
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: `test-results/shots/${info.project.name}-07-both-outputs.png` });
+  await closePanel(page, info.project.name);
+  await expect(page.getByRole('button', { name: /On stop: Transcribe, then Clean up/ })).toBeVisible();
 });
+
+test('record several takes, then process them together', async ({ page }, info) => {
+  await setup(page, { chat: (body) => (JSON.stringify(body.messages).includes('Summarise') ? 'Both takes argue for bike lanes.' : 'Cleaned take.') });
+  await page.goto('./');
+  await page.getByRole('button', { name: /start a session/i }).click();
+  await page.getByRole('button', { name: /On stop:/ }).click();
+  await page.getByRole('radio', { name: 'When I ask' }).click();
+  await page.getByRole('combobox', { name: 'After processing, also' }).selectOption('summarize');
+  await closePanel(page, info.project.name);
+  await expect(page.getByRole('button', { name: /When asked: Transcribe, then Clean up/ })).toBeVisible();
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Start recording' }).click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: 'Stop recording' }).click();
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible();
+  }
+  await expect(page.getByText('2 recordings waiting')).toBeVisible();
+  await expect(page.getByText(/then summarise across all/)).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `test-results/shots/${info.project.name}-08-waiting.png` });
+  await page.getByRole('button', { name: 'Process now' }).click();
+  await expect(page.getByText('Both takes argue for bike lanes.')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Cleaned take.')).toHaveCount(2);
+  await expect(page.getByText('Across 2 recordings')).toBeVisible();
+  await expect(page.getByText(/recordings? waiting/)).toHaveCount(0);
+});
+
+async function closePanel(page: import('@playwright/test').Page, project: string) {
+  if (project === 'mobile') await page.getByRole('button', { name: 'Close', exact: true }).click();
+  else await page.getByRole('button', { name: 'Close panel' }).click();
+}
 
 test('rename a session by clicking its title', async ({ page }) => {
   await setup(page);

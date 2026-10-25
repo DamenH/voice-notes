@@ -4,7 +4,7 @@ import { deleteEntry, derivedEntryIds, updateEntry } from '../lib/library';
 import { cancelRun, inferOnEntries, resolveApproval, retryRun } from '../lib/runs';
 import { formatCost } from '../lib/openrouter/catalog';
 import { formatTime } from '../lib/audio/pcm';
-import { modelName, runActivity, runVerb } from '../lib/pipelineInfo';
+import { byStepOrder, modelName, runActivity, runVerb } from '../lib/pipelineInfo';
 import { resolveTts } from '../lib/instructions';
 import { speechPlayer } from '../lib/tts';
 import { friendlyError } from '../lib/openrouter/client';
@@ -93,8 +93,14 @@ function TurnView({
   useEffect(() => setOpen(defaultOpen || focusInDetails), [defaultOpen, focusInDetails]);
   const sorted = useMemo(() => [...turn.runs].sort((a, b) => a.createdAt - b.createdAt), [turn.runs]);
   const active = sorted.filter((r) => ACTIVE.includes(r.status));
-  const primary = turn.entries.filter((e) => e.visibility === 'primary');
-  const details = turn.entries.filter((e) => e.visibility === 'detail');
+  const primary = byStepOrder(
+    turn.entries.filter((e) => e.visibility === 'primary'),
+    sorted,
+  );
+  const details = byStepOrder(
+    turn.entries.filter((e) => e.visibility === 'detail'),
+    sorted,
+  );
   const hasSummary = sorted.length > 0 || details.length > 0;
 
   return (
@@ -105,6 +111,11 @@ function TurnView({
         ) : (
           <UserMessage entry={turn.anchor} />
         )
+      ) : sorted.some((r) => r.settings.batch) ? (
+        <p className="flex items-center gap-2 text-[13px] font-semibold text-muted">
+          <Icon name="sparkle" size={14} className="text-accent" />
+          Across {String(sorted.find((r) => r.settings.batch)!.settings.recordings ?? 'these')} recordings
+        </p>
       ) : (
         <p className="text-[13px] text-faint italic">Source deleted</p>
       )}
@@ -147,7 +158,6 @@ function RecordingCard({ entry }: { entry: Entry }) {
   };
   const items: MenuItem[] = [
     { label: 'Process…', icon: 'sliders', onSelect: () => openPanel({ kind: 'process', entryId: entry.id }) },
-    { label: 'Listen with Inkling', icon: 'ear', onSelect: () => openPanel({ kind: 'process', entryId: entry.id, mode: 'audio' }) },
     {
       label: 'Rename',
       icon: 'pencil',
@@ -367,7 +377,12 @@ function DetailEntry({ entry, settings }: { entry: Entry; settings: Settings }) 
     <div id={`entry-${entry.id}`} className="rounded-lg bg-surface-2/60 px-3 py-2 transition">
       <div className="mb-1 flex items-center gap-2 text-[13px]">
         <span className="font-semibold">{entry.title ?? entry.kind}</span>
-        {entry.meta?.model ? <span className="text-faint">{modelName(String(entry.meta.model), settings)}</span> : null}
+        {entry.meta?.model ? (
+          <span className="text-faint">
+            {modelName(String(entry.meta.model), settings)}
+            {speechNote(entry)}
+          </span>
+        ) : null}
         {entry.kind === 'error' && <span className="text-faint">resolved</span>}
         <span className="flex-1" />
         <EntryMenu entry={entry} settings={settings} />
@@ -387,6 +402,14 @@ function DetailEntry({ entry, settings }: { entry: Entry; settings: Settings }) 
       )}
     </div>
   );
+}
+
+/** "speech only · 0:58 of 10:00" for transcripts made from detected speech. */
+function speechNote(entry: Entry) {
+  const sent = entry.meta?.speechSeconds;
+  const total = entry.meta?.totalSeconds;
+  if (sent === undefined || total === undefined) return '';
+  return ` · speech only, ${formatTime(Number(sent))} of ${formatTime(Number(total))}`;
 }
 
 function prettyJson(s: string) {
@@ -433,6 +456,7 @@ function PrimaryEntry({ entry, settings, session, group, runs }: { entry: Entry;
         <span className="min-w-0 truncate text-faint">
           {entry.meta?.model ? modelName(String(entry.meta.model), settings) : ''}
           {run?.usage.cost ? ` · ${formatCost(run.usage.cost)}` : ''}
+          {speechNote(entry)}
         </span>
         <span className="flex-1" />
         {!streaming && entry.text && <SpeakButton entry={entry} settings={settings} session={session} group={group} />}

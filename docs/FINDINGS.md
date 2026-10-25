@@ -137,6 +137,21 @@ it (e.g. "Sevilla: heard /seˈvila/, expected /seˈβiʎa/"), but some claims ar
 marginal (e.g. "queso: heard /ˈke.so/, expected /ˈkeso/" differs only by a
 syllable dot). Treat IPA from audio as a hint, not a measurement.
 
+## Skipping silence (2026-10-25)
+
+Speech is detected on the device from 30 ms frame levels. The threshold sits 12 dB
+above the recording's noise floor (its 15th-percentile level), but never higher
+than 10 dB below its loud level, so a recording that is mostly speech keeps its
+quieter words. Regions are padded (0.3 s before, 0.5 s after) and merged across
+pauses shorter than 1.2 s. They are joined with 0.4 s gaps into requests of at most
+five minutes, and Whisper's timestamps are mapped back to recording time.
+
+Live check: a 1 min 40 s recording with room hiss and two 18 s stretches of speech
+sent one 37.8 s request; both stretches were transcribed in full, and the timestamps
+(0:14–0:29, 1:09–1:26) match where the speech was. A recording with no speech makes
+no request. Energy-based detection can be fooled by loud steady noise; if that
+matters, Silero VAD (~2 MB) can run in the browser instead.
+
 ## Android recording behaviour (expected; verify on a device)
 
 - A screen wake lock is held while recording, so the screen doesn't sleep while

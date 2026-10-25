@@ -476,6 +476,22 @@ https://damenh.github.io/voice-notes/.
 Provider details and browser behavior are validated during implementation; model
 presets and endpoint constraints remain configurable as they evolve.
 
+## Focus change (2026-10-25)
+
+The app focuses on thinking aloud. Inkling and other audio-aware models proved
+unreliable in practice (e.g. misidentifying Norwegian as Swedish or English), so
+they are removed from the interface: no Listen step in "Add step", no Inkling
+presets, and the model's reprocessing tool only re-transcribes. The underlying
+support remains, and existing Listen steps keep working. Added for this focus:
+
+- **Record now, process later:** a pipeline runs when recording stops or when the
+  user asks; waiting recordings are processed together, optionally with one Assist
+  step across the batch.
+- **Skip silence:** transcription sends only detected speech (on-device, energy
+  based with an adaptive noise floor), so long, mostly quiet recordings cost what
+  was said. Timestamps map back to recording time.
+- A "rubber duck" mode is deliberately postponed.
+
 ## Decisions deferred (2026-10-25)
 
 - **Opus audio compression:** skipped for now. The development machine has

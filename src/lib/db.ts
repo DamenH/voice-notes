@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, PIPELINE_PRESETS, defaultSettings } from './defaults';
+import { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, defaultSettings } from './defaults';
 import { normalizePipeline } from './pipeline';
 import { OLD_LANGUAGE_PRACTICE_V1, OLD_LANGUAGE_PRACTICE_V2, OLD_PROCESSING_INSTRUCTIONS_V1, OLD_PROCESSING_INSTRUCTIONS_V2 } from './migrations';
 import type {
@@ -64,17 +64,12 @@ export class VoiceNotesDB extends Dexie {
         });
       }
     });
-    // v3: pipelines become step lists. Convert every saved pipeline and preset, and add
-    // the new built-in "Transcribe + Inkling" preset.
+    // v3: pipelines become step lists. Convert every saved pipeline and preset.
     this.version(3).upgrade(async (tx) => {
       await tx.table('settings').toCollection().modify((s: Settings) => {
         if (s.pipeline) s.pipeline = normalizePipeline(s.pipeline)!;
         if (s.pipelinePresets) {
           s.pipelinePresets = s.pipelinePresets.map((p) => ({ ...p, config: normalizePipeline(p.config)! }));
-          if (!s.pipelinePresets.some((p) => p.id === 'transcribe-inkling')) {
-            const added = PIPELINE_PRESETS.find((p) => p.id === 'transcribe-inkling')!;
-            s.pipelinePresets.splice(1, 0, added);
-          }
         }
       });
       for (const t of ['groups', 'sessions']) {
@@ -106,6 +101,13 @@ export class VoiceNotesDB extends Dexie {
           if (row.instructions?.processing) row.instructions.processing = swap(row.instructions.processing);
         });
       }
+    });
+    // v5: the app focuses on thinking aloud; the built-in Inkling presets are removed.
+    // Pipelines that already contain a Listen step keep working.
+    this.version(5).upgrade(async (tx) => {
+      await tx.table('settings').toCollection().modify((s: Settings) => {
+        s.pipelinePresets = (s.pipelinePresets ?? []).filter((p) => !(p.builtin && (p.id === 'transcribe-inkling' || p.id === 'language-practice')));
+      });
     });
   }
 }

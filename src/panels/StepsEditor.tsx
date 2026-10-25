@@ -104,7 +104,6 @@ function AddStep({ onAdd, canAssist }: { onAdd: (k: StepKind) => void; canAssist
         className="border border-dashed border-border text-muted hover:border-accent hover:text-accent"
         items={[
           { label: 'Transcribe', icon: 'text', onSelect: () => onAdd('transcribe') },
-          { label: 'Listen (Inkling)', icon: 'ear', onSelect: () => onAdd('listen') },
           { label: canAssist ? 'Assist' : 'Assist (add another step first)', icon: 'sparkle', onSelect: () => onAdd('assist'), disabled: !canAssist },
         ]}
       />
@@ -148,7 +147,15 @@ function StepCard({
       <div className="flex flex-col gap-3 p-3">
         <p className="text-[13px] text-muted">{KIND_HELP[s.kind]}</p>
         {s.kind === 'transcribe' && (
-          <ModelSelect label="Model" kind="transcription" value={s.model ?? ''} options={settings.sttOptions} onChange={(model) => onChange({ model })} />
+          <>
+            <ModelSelect label="Model" kind="transcription" value={s.model ?? ''} options={settings.sttOptions} onChange={(model) => onChange({ model })} />
+            <Toggle
+              label="Skip silence"
+              description="Only the parts where you speak are sent, so long, mostly quiet recordings cost very little."
+              checked={s.skipSilence !== false}
+              onChange={(skipSilence) => onChange({ skipSilence })}
+            />
+          </>
         )}
         {s.kind === 'listen' && (
           <>

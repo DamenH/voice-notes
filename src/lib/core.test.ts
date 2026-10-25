@@ -134,3 +134,29 @@ describe('pipeline helpers', () => {
     expect(samePipeline(p, { ...p, steps: p.steps.map((s, i) => (i === 0 ? { ...s, output: 'show' as const } : s)) })).toBe(false);
   });
 });
+
+describe('speech detection', () => {
+  it('finds speech above an adaptive noise floor, padded and merged', async () => {
+    const { detectSpeech, toRecordingTime, FRAME } = await import('./audio/speech');
+    // 10 s at -50 dB with speech at 2–3 s and 3.5–4 s (merged) and 8–8.5 s.
+    const levels = new Float32Array(Math.round(10 / FRAME)).fill(-50);
+    const on = (a: number, b: number) => levels.fill(-20, Math.round(a / FRAME), Math.round(b / FRAME));
+    on(2, 3);
+    on(3.5, 4);
+    on(8, 8.5);
+    const regions = detectSpeech(levels, 100);
+    expect(regions.length).toBe(2);
+    expect(regions[0].start).toBeCloseTo(101.7, 1);
+    expect(regions[0].end).toBeCloseTo(104.5, 1);
+    expect(regions[1].start).toBeCloseTo(107.7, 1);
+    // Joined audio: region 1 is 2.8 s, then a 0.4 s gap, then region 2.
+    expect(toRecordingTime(regions, 1)).toBeCloseTo(102.7, 1);
+    expect(toRecordingTime(regions, 3.0)).toBeCloseTo(107.7, 1);
+    expect(toRecordingTime(regions, 3.5)).toBeCloseTo(108.0, 1);
+  });
+
+  it('treats a silent recording as having no speech', async () => {
+    const { detectSpeech } = await import('./audio/speech');
+    expect(detectSpeech(new Float32Array(300).fill(-90), 0)).toEqual([]);
+  });
+});

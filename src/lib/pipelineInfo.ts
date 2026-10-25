@@ -57,3 +57,10 @@ export function runActivity(run: Run, settings: Settings): string {
   const preset = presetById(settings, run.mode);
   return preset?.id === 'cleanup' ? 'Cleaning up' : `${preset?.name ?? 'Working'}`;
 }
+
+/** Order a turn's outputs by the step (run) that produced them, not by when they finished. */
+export function byStepOrder<T extends { runId?: string; createdAt: number }>(entries: T[], runs: { id: string; createdAt: number }[]): T[] {
+  const order = new Map(runs.map((r) => [r.id, r.createdAt]));
+  const key = (e: T) => (e.runId && order.has(e.runId) ? order.get(e.runId)! : e.createdAt);
+  return [...entries].sort((a, b) => key(a) - key(b) || a.createdAt - b.createdAt);
+}

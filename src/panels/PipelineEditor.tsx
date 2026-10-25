@@ -7,7 +7,7 @@ import { pipelineCostPerMinute } from '../lib/pipelineInfo';
 import { formatCost } from '../lib/openrouter/catalog';
 import type { Group, PipelineConfig, Session, Settings } from '../lib/types';
 import { useCatalog } from '../app/hooks';
-import { Button, Segmented, toast } from '../ui/primitives';
+import { Button, Field, Segmented, inputClass, toast } from '../ui/primitives';
 import { StepsEditor } from './StepsEditor';
 
 export type Scope = 'session' | 'group' | 'global';
@@ -84,7 +84,8 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
             <span key={p.id} className="inline-flex">
               <button
                 type="button"
-                onClick={() => void save(clonePipeline(p.config))}
+                // Presets set the steps; when the pipeline runs is kept.
+                onClick={() => void save({ ...clonePipeline(p.config), trigger: config.trigger, batchPreset: config.batchPreset })}
                 aria-pressed={matching?.id === p.id}
                 className={`min-h-9 rounded-full border px-3 text-[13px] font-semibold transition ${
                   matching?.id === p.id ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-text'
@@ -107,6 +108,40 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
           ))}
         </div>
       </div>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-[15px] font-bold">Run</h3>
+        <Segmented
+          label="When the pipeline runs"
+          value={config.trigger ?? 'stop'}
+          onChange={(trigger) => change((c) => ({ ...c, trigger }))}
+          options={[
+            { value: 'stop', label: 'When recording stops' },
+            { value: 'request', label: 'When I ask' },
+          ]}
+        />
+        {config.trigger === 'request' ? (
+          <>
+            <p className="text-[13px] text-muted">Record as many takes as you like; they wait until you press “Process now”.</p>
+            <Field label="After processing, also">
+              <select className={inputClass} value={config.batchPreset ?? ''} onChange={(e) => {
+                  // Read the value now: the save is asynchronous and the event target resets.
+                  const batchPreset = e.target.value || null;
+                  change((c) => ({ ...c, batchPreset }));
+                }}>
+                <option value="">Nothing</option>
+                {settings.inferencePresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} across all of them ({p.tier === 'big' ? 'Big' : 'Little'})
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
+        ) : (
+          <p className="text-[13px] text-muted">Each recording is processed as soon as you stop.</p>
+        )}
+      </section>
 
       <section className="flex flex-col gap-2">
         <h3 className="text-[15px] font-bold">Steps</h3>

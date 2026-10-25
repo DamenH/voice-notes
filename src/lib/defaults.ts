@@ -71,31 +71,6 @@ export const DEFAULT_PIPELINE: PipelineConfig = {
 
 export const PIPELINE_PRESETS: PipelinePreset[] = [
   { id: 'thinking-aloud', name: 'Thinking aloud', config: DEFAULT_PIPELINE, builtin: true },
-  {
-    id: 'transcribe-inkling',
-    name: 'Transcribe + Inkling',
-    config: {
-      language: '',
-      steps: [
-        transcribe('ti-transcribe', 'show'),
-        { id: 'ti-listen', kind: 'listen', model: INKLING, instructions: '', output: 'show', useTranscript: false },
-      ],
-    },
-    builtin: true,
-  },
-  {
-    id: 'language-practice',
-    name: 'Language practice',
-    config: {
-      language: '',
-      steps: [
-        transcribe('lp-transcribe', 'collapse'),
-        { id: 'lp-listen', kind: 'listen', model: INKLING, instructions: LANGUAGE_PRACTICE_PROCESSING, output: 'collapse', useTranscript: false },
-        { id: 'lp-tutor', kind: 'assist', preset: 'tutor', instructions: '', output: 'show', input: 'all' },
-      ],
-    },
-    builtin: true,
-  },
   { id: 'transcribe-only', name: 'Transcribe only', config: { language: '', steps: [transcribe('to-transcribe', 'show')] }, builtin: true },
   { id: 'manual', name: 'Manual', config: { language: '', steps: [] }, builtin: true },
 ];

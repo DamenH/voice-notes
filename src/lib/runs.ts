@@ -100,7 +100,7 @@ export async function planPipeline(
         kind: 'process',
         mode: 'stt',
         model: step.model!,
-        settings: { language: config.language, primary, stepId: step.id },
+        settings: { language: config.language, primary, stepId: step.id, skipSilence: step.skipSilence !== false },
       });
     } else if (step.kind === 'listen') {
       const transcriptRun = step.useTranscript
@@ -191,7 +191,8 @@ export async function runPipelineForRecording(recordingEntryId: Id) {
   if (!recording) return;
   const ctx = await contextFor(recording.sessionId);
   const config = resolvePipeline(ctx.settings, ctx.group, ctx.session);
-  if (config.steps.length === 0) return;
+  // "When I ask": recordings wait until the user processes them together.
+  if (config.steps.length === 0 || config.trigger === 'request') return;
   if (Number(recording.meta?.duration ?? 0) < 0.5) return;
   await submitPlan(await planPipeline(recording, config, { trigger: 'auto' }), recording);
 }
@@ -381,4 +382,47 @@ export async function requestToolProcessing(parent: Run, req: AudioRequest, tool
       recordingTitle: recording.title,
     },
   });
+}
+
+/** Recordings in a session that no pipeline or manual processing has touched yet. */
+export async function waitingRecordings(sessionId: Id): Promise<Entry[]> {
+  const entries = await db.entries.where('sessionId').equals(sessionId).sortBy('createdAt');
+  const runTurns = new Set((await db.runs.where('sessionId').equals(sessionId).toArray()).map((r) => r.turnId));
+  return entries.filter((e) => e.kind === 'recording' && e.status === 'done' && Number(e.meta?.duration ?? 0) >= 0.5 && !runTurns.has(e.turnId));
+}
+
+/**
+ * Process every waiting recording with the session's pipeline, then (optionally) run one
+ * Assist preset over all of their final outputs together.
+ */
+export async function processWaiting(sessionId: Id): Promise<{ recordings: number; batchRunId?: Id }> {
+  const ctx = await contextFor(sessionId);
+  const config = resolvePipeline(ctx.settings, ctx.group, ctx.session);
+  const waiting = await waitingRecordings(sessionId);
+  if (waiting.length === 0 || config.steps.length === 0) return { recordings: 0 };
+  const finals: Run[] = [];
+  for (const recording of waiting) {
+    const plan = await planPipeline(recording, config, { trigger: 'manual' });
+    if (plan.runs.length === 0) continue;
+    await db.runs.bulkAdd(plan.runs);
+    finals.push(plan.runs.at(-1)!);
+  }
+  let batchRunId: Id | undefined;
+  const preset = config.batchPreset ? presetById(ctx.settings, config.batchPreset) : undefined;
+  if (preset && finals.length) {
+    const run = baseRun(ctx, newId('batch'), {
+      kind: 'infer',
+      mode: preset.id,
+      tier: preset.tier,
+      model: ctx.settings.models[preset.tier],
+      instructions: inferenceInstructions(ctx, preset),
+      dependsOn: finals.map((r) => r.id),
+      sourceRefs: waiting.map((e) => ({ entryId: e.id })),
+      settings: { presetName: preset.name, primary: true, batch: true, recordings: waiting.length },
+    });
+    await db.runs.add(run);
+    batchRunId = run.id;
+  }
+  notifyScheduler();
+  return { recordings: waiting.length, batchRunId };
 }

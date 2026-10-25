@@ -12,7 +12,7 @@ import { friendlyError } from '../lib/openrouter/client';
 import { runVerb } from '../lib/pipelineInfo';
 import { speechPlayer } from '../lib/tts';
 import type { Entry, Group, InstructionSet, PipelineConfig, Session, Settings, TtsSettings } from '../lib/types';
-import { INKLING, STT_DEFAULT } from '../lib/defaults';
+import { STT_DEFAULT } from '../lib/defaults';
 import { clonePipeline, samePipeline, step } from '../lib/pipeline';
 import { StepsEditor } from './StepsEditor';
 import { useCatalog } from '../app/hooks';
@@ -27,7 +27,7 @@ export function panelTitle(p: Panel) {
     instructions: 'Instructions',
     voice: 'Read-aloud voice',
     turn: 'Details',
-    process: p.kind === 'process' && p.mode === 'audio' ? 'Listen with Inkling' : 'Process recording',
+    process: 'Process recording',
   }[p.kind];
 }
 
@@ -42,7 +42,7 @@ export function PanelBody({ panel, settings, session, group }: { panel: Panel; s
     case 'turn':
       return <TurnInspector turnId={panel.turnId} settings={settings} />;
     case 'process':
-      return <ProcessPanel entryId={panel.entryId} initialMode={panel.mode} settings={settings} session={session} group={group} />;
+      return <ProcessPanel entryId={panel.entryId} settings={settings} session={session} group={group} />;
   }
 }
 
@@ -264,13 +264,11 @@ function Segments({ runId }: { runId: string }) {
 
 function ProcessPanel({
   entryId,
-  initialMode,
   settings,
   session,
   group,
 }: {
   entryId: string;
-  initialMode?: 'audio' | 'stt' | 'combined';
   settings: Settings;
   session?: Session;
   group?: Group;
@@ -280,10 +278,6 @@ function ProcessPanel({
   // A local copy of the session's pipeline: editing it here never changes the session.
   const [config, setConfig] = useState<PipelineConfig>(() => {
     const base = resolvePipeline(settings, group, session);
-    if (initialMode === 'audio') {
-      const model = base.steps.find((s) => s.kind === 'listen')?.model ?? settings.audioOptions[0]?.id ?? INKLING;
-      return { language: base.language, steps: [step('listen', { model, output: 'show', useTranscript: false })] };
-    }
     if (base.steps.length === 0) return { language: base.language, steps: [step('transcribe', { model: settings.sttOptions[0]?.id ?? STT_DEFAULT, output: 'show' })] };
     return clonePipeline(base);
   });

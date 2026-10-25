@@ -57,17 +57,16 @@ export const TOOL_SPECS: ToolSpec[] = [
     function: {
       name: 'request_audio_processing',
       description:
-        'Ask to re-process original audio from a recording (optionally a time range). "audio" mode lets an audio-aware model (Inkling) hear pronunciation, pauses and emphasis; "stt" produces a timestamped transcript. This costs money, so the user must approve it; the result is returned when done.',
+        'Ask to transcribe original audio from a recording again (optionally a time range), e.g. when a transcript looks wrong. This costs money, so the user must approve it; the new transcript is returned when done.',
       parameters: {
         type: 'object',
         properties: {
           recording_entry_id: { type: 'string' },
           start: { type: 'number', description: 'Seconds' },
           end: { type: 'number', description: 'Seconds' },
-          mode: { type: 'string', enum: ['audio', 'stt'] },
-          instructions: { type: 'string', description: 'What to listen for.' },
+          instructions: { type: 'string', description: 'Why it is needed.' },
         },
-        required: ['recording_entry_id', 'mode', 'instructions'],
+        required: ['recording_entry_id'],
       },
     },
   },
@@ -190,7 +189,7 @@ export async function executeTool(groupId: Id, name: string, rawArgs: string): P
       const start = args.start === undefined ? undefined : Math.max(0, Number(args.start));
       const end = args.end === undefined ? undefined : Math.min(duration, Number(args.end));
       if (start !== undefined && end !== undefined && end <= start) throw new ToolError('end must be after start.');
-      const mode = args.mode === 'stt' ? 'stt' : 'audio';
+      const mode = 'stt' as const;
       return { kind: 'approval', request: { recordingEntryId: entry.id, start, end, mode, instructions: String(args.instructions ?? '') } };
     }
     default:

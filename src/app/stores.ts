@@ -29,7 +29,7 @@ export type Panel =
   | { kind: 'instructions' }
   | { kind: 'voice' }
   | { kind: 'turn'; turnId: string }
-  | { kind: 'process'; entryId: string; mode?: 'audio' | 'stt' | 'combined' };
+  | { kind: 'process'; entryId: string };
 
 export const inspector = store<Panel | null>(null);
 
