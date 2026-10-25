@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
-import { deleteSession, renameSession } from '../lib/library';
+import { renameSession } from '../lib/library';
 import { resolveTts } from '../lib/instructions';
 import { speechPlayer } from '../lib/tts';
 import { friendlyError } from '../lib/openrouter/client';
@@ -10,8 +10,9 @@ import { navigate } from '../app/router';
 import { openPanel } from '../app/stores';
 import { useApiKey, useDesktop, useOnline } from '../app/hooks';
 import { Icon } from '../ui/Icon';
-import { IconButton, Menu, confirmAction, toast } from '../ui/primitives';
+import { IconButton, Menu, toast } from '../ui/primitives';
 import { EditableTitle } from '../ui/EditableTitle';
+import { useSessionActions } from './SessionActions';
 import { Dock } from './Dock';
 import { Timeline, buildTurns } from './Timeline';
 
@@ -98,6 +99,7 @@ function SessionHeader({ session, group, settings }: { session: Session; group?:
   const online = useOnline();
   const key = useApiKey();
   const showDetails = session.showDetails ?? settings.showDetails;
+  const actions = useSessionActions(session);
   return (
     <header className="flex min-h-14 items-center gap-1">
       {!desktop && <IconButton icon="back" label="Back to group" onClick={() => navigate(group ? { name: 'group', groupId: group.id } : { name: 'home' })} />}
@@ -126,25 +128,10 @@ function SessionHeader({ session, group, settings }: { session: Session; group?:
           { label: showDetails ? 'Collapse processing details' : 'Show processing details', icon: 'panel', onSelect: () => void db.sessions.update(session.id, { showDetails: !showDetails }) },
           { label: 'Pipeline', icon: 'bolt', onSelect: () => openPanel({ kind: 'pipeline' }) },
           { label: 'Read-aloud voice', icon: 'speaker', onSelect: () => openPanel({ kind: 'voice' }) },
-          {
-            label: 'Rename',
-            icon: 'pencil',
-            onSelect: () => {
-              const t = prompt('Session name', session.title);
-              if (t?.trim()) void renameSession(session.id, t.trim());
-            },
-          },
-          {
-            label: 'Delete session',
-            icon: 'trash',
-            danger: true,
-            onSelect: () => {
-              if (!confirmAction(`Delete “${session.title}” and all its recordings? This cannot be undone.`)) return;
-              void deleteSession(session.id).then(() => navigate(group ? { name: 'group', groupId: group.id } : { name: 'home' }));
-            },
-          },
+          ...actions.items,
         ]}
       />
+      {actions.dialog}
     </header>
   );
 }

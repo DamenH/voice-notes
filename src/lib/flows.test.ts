@@ -563,3 +563,53 @@ describe('listening writes its own transcript (v4)', () => {
     expect(transcript.text).toBe('Test 1, 2, 3.');
   });
 });
+
+describe('session export', () => {
+  it('exports text, audio and an importable dump for one session only', async () => {
+    const { exportSession, sessionMarkdown } = await import('./sessionExport');
+    const { importLibrary } = await import('./backup');
+    const { unzipSync } = await import('fflate');
+    mockOpenRouter((path) => (path === 'audio/transcriptions' ? json(WHISPER_RESPONSE) : textStream('Clean bike lanes.')));
+    const { entry, session, group } = await seedRecording();
+    await runPipelineForRecording(entry.id);
+    await settled(entry.turnId);
+    const other = await createSession(group.id, 'Other session');
+    await createEntry({ sessionId: other.id, groupId: group.id, kind: 'user_message', text: 'not exported', status: 'done', visibility: 'primary' });
+
+    const md = await sessionMarkdown(session.id);
+    expect(md).toContain('# Bike lanes');
+    expect(md).toContain('### Transcript (openai/whisper-large-v3-turbo)');
+    expect(md).toContain('Clean bike lanes.');
+    expect(md).not.toContain('not exported');
+
+    const audio = await exportSession(session.id, 'audio');
+    expect(audio.filename).toBe('bike-lanes-01.wav');
+    expect(new TextDecoder().decode(new Uint8Array(await audio.blob.slice(0, 4).arrayBuffer()))).toBe('RIFF');
+
+    const dump = await exportSession(session.id, 'dump');
+    const files = unzipSync(new Uint8Array(await dump.blob.arrayBuffer()));
+    const lib = JSON.parse(new TextDecoder().decode(files['library.json']));
+    expect(lib.tables.sessions.map((s: { id: string }) => s.id)).toEqual([session.id]);
+    expect(lib.tables.settings).toEqual([]);
+    expect(lib.audioChunks.length).toBeGreaterThan(0);
+
+    // Restores into an empty library.
+    await deleteSession(session.id);
+    await deleteSession(other.id);
+    const summary = await importLibrary(dump.blob);
+    expect(summary.added.sessions).toBe(1);
+    expect((await db.entries.where('sessionId').equals(session.id).count())).toBeGreaterThan(2);
+  });
+
+  it('zips several recordings', async () => {
+    const { exportSession } = await import('./sessionExport');
+    const { unzipSync } = await import('fflate');
+    const { session, group } = await seedRecording();
+    const second = await createEntry({ sessionId: session.id, groupId: group.id, kind: 'recording', text: '', title: 'Second take', status: 'done', visibility: 'primary' });
+    const rec = (await db.recordings.toArray())[0];
+    await db.entries.update(second.id, { meta: { recordingId: rec.id, duration: rec.duration } });
+    const audio = await exportSession(session.id, 'audio');
+    expect(audio.filename).toBe('bike-lanes-audio.zip');
+    expect(Object.keys(unzipSync(new Uint8Array(await audio.blob.arrayBuffer())))).toEqual(['bike-lanes-01.wav', 'bike-lanes-02-second-take.wav']);
+  });
+});

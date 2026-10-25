@@ -36,3 +36,27 @@ test('check for updates installs a new build and keeps data', async ({ page }, i
   await page.goto('./#/');
   await expect(page.getByRole('link', { name: /Notes/ }).first()).toBeVisible();
 });
+
+test('export a session as text, then delete it from the list', async ({ page }) => {
+  await setup(page);
+  await page.goto('./');
+  await page.getByRole('button', { name: /start a session/i }).click();
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Stop recording' }).click();
+  await expect(page.getByText(/main argument is that cities/)).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: 'Session options' }).click();
+  await page.getByRole('menuitem', { name: 'Export…' }).click();
+  const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /^Text/ }).click()]);
+  expect(file.suggestedFilename()).toMatch(/\.md$/);
+  const text = await (await file.createReadStream()).toArray();
+  expect(Buffer.concat(text).toString()).toContain('main argument is that cities');
+
+  await page.goto('./#/');
+  page.once('dialog', (d) => void d.accept());
+  await page.getByRole('button', { name: /^Actions for/ }).first().click();
+  await page.getByRole('menuitem', { name: 'Delete session' }).click();
+  await expect(page.getByText('Session deleted')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent sessions' })).toHaveCount(0);
+});

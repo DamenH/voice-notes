@@ -1,7 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
 import { createGroup, createSession, deleteGroup, renameGroup } from '../lib/library';
-import type { Settings } from '../lib/types';
+import type { Session, Settings } from '../lib/types';
+import { useSessionActions } from '../session/SessionActions';
 import { navigate } from '../app/router';
 import { useDesktop, useRecorder } from '../app/hooks';
 import { Icon } from '../ui/Icon';
@@ -136,26 +137,34 @@ export function HomePage() {
   );
 }
 
-function SessionList({ sessions, groupNames }: { sessions: { id: string; title: string; groupId: string; lastActivityAt: number }[]; groupNames?: Map<string, string> }) {
-  const rec = useRecorder();
+function SessionList({ sessions, groupNames }: { sessions: Session[]; groupNames?: Map<string, string> }) {
   return (
     <ul className="overflow-hidden rounded-2xl border border-hairline bg-surface">
       {sessions.map((s) => (
-        <li key={s.id} className="border-b border-hairline last:border-0">
-          <a href={`#/s/${s.id}`} className="flex min-h-14 items-center gap-3 px-4 py-2 hover:bg-surface-2">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-medium">{s.title}</span>
-              <span className="block truncate text-[13px] text-muted">
-                {groupNames ? `${groupNames.get(s.groupId) ?? ''} · ` : ''}
-                {new Date(s.lastActivityAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-              </span>
-            </span>
-            {rec.sessionId === s.id && rec.state !== 'idle' && <span className="size-2.5 rounded-full bg-rec" title="Recording" />}
-            <Icon name="chevron" size={16} className="text-faint" />
-          </a>
-        </li>
+        <SessionRow key={s.id} session={s} groupName={groupNames?.get(s.groupId)} showGroup={!!groupNames} />
       ))}
     </ul>
+  );
+}
+
+function SessionRow({ session: s, groupName, showGroup }: { session: Session; groupName?: string; showGroup: boolean }) {
+  const rec = useRecorder();
+  const actions = useSessionActions(s);
+  return (
+    <li className="flex items-center border-b border-hairline pr-1 last:border-0">
+      <a href={`#/s/${s.id}`} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2 pl-4 hover:bg-surface-2">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-medium">{s.title}</span>
+          <span className="block truncate text-[13px] text-muted">
+            {showGroup ? `${groupName ?? ''} · ` : ''}
+            {new Date(s.lastActivityAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+          </span>
+        </span>
+        {rec.sessionId === s.id && rec.state !== 'idle' && <span className="size-2.5 rounded-full bg-rec" title="Recording" />}
+      </a>
+      <Menu items={actions.items} label={`Actions for ${s.title}`} />
+      {actions.dialog}
+    </li>
   );
 }
 

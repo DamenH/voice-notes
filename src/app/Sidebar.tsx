@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
 import { createGroup, createSession } from '../lib/library';
-import type { Group } from '../lib/types';
+import type { Group, Session } from '../lib/types';
+import { useSessionActions } from '../session/SessionActions';
 import { navigate, useRoute } from './router';
 import { useRecorder } from './hooks';
 import { Icon } from '../ui/Icon';
-import { IconButton } from '../ui/primitives';
+import { IconButton, Menu } from '../ui/primitives';
 
 /** Desktop navigation: groups with their sessions. Collapses to an icon rail on short landscape screens. */
 export function Sidebar({ rail }: { rail: boolean }) {
@@ -79,7 +80,7 @@ function RailLink({ href, icon, label, active }: { href: string; icon: 'folder' 
   );
 }
 
-function GroupItem({ group, sessions, open, activeSession }: { group: Group; sessions: { id: string; title: string }[]; open: boolean; activeSession?: string }) {
+function GroupItem({ group, sessions, open, activeSession }: { group: Group; sessions: Session[]; open: boolean; activeSession?: string }) {
   const [expanded, setExpanded] = useState(open);
   const rec = useRecorder();
   const show = expanded || open;
@@ -104,19 +105,30 @@ function GroupItem({ group, sessions, open, activeSession }: { group: Group; ses
         <ul className="ml-4 border-l border-hairline pl-2">
           {sessions.length === 0 && <li className="px-2 py-1 text-[13px] text-faint">No sessions yet</li>}
           {sessions.map((s) => (
-            <li key={s.id}>
-              <a
-                href={`#/s/${s.id}`}
-                aria-current={s.id === activeSession ? 'page' : undefined}
-                className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-[14px] text-muted hover:bg-surface-2 hover:text-text aria-[current=page]:bg-accent-soft aria-[current=page]:font-semibold aria-[current=page]:text-accent"
-              >
-                <span className="flex-1 truncate">{s.title}</span>
-                {rec.sessionId === s.id && rec.state !== 'idle' && <span className="size-2 rounded-full bg-rec" title="Recording" />}
-              </a>
-            </li>
+            <SidebarSession key={s.id} session={s} active={s.id === activeSession} recording={rec.sessionId === s.id && rec.state !== 'idle'} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+function SidebarSession({ session: s, active, recording }: { session: Session; active: boolean; recording: boolean }) {
+  const actions = useSessionActions(s);
+  return (
+    <li className="group/row relative flex items-center">
+      <a
+        href={`#/s/${s.id}`}
+        aria-current={active ? 'page' : undefined}
+        className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg py-1 pr-9 pl-2 text-[14px] text-muted hover:bg-surface-2 hover:text-text aria-[current=page]:bg-accent-soft aria-[current=page]:font-semibold aria-[current=page]:text-accent"
+      >
+        <span className="flex-1 truncate">{s.title}</span>
+        {recording && <span className="size-2 rounded-full bg-rec" title="Recording" />}
+      </a>
+      <span className="absolute right-0 opacity-0 transition group-hover/row:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
+        <Menu items={actions.items} label={`Actions for ${s.title}`} className="!size-8" />
+      </span>
+      {actions.dialog}
+    </li>
   );
 }

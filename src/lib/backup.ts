@@ -13,10 +13,28 @@ const TABLES: Tables[] = ['groups', 'sessions', 'entries', 'recordings', 'runs',
  * Credentials are never included (they are not in the database). Cached speech is
  * left out because it can be regenerated.
  */
-export async function exportLibrary(): Promise<Blob> {
+/**
+ * Export the library (or one session of it) as a zip: library.json plus raw PCM audio
+ * chunks. The same format imports through Settings, merging by id. Credentials are
+ * never included (they are not in the database). Cached speech is left out because it
+ * can be regenerated.
+ */
+export async function exportLibrary(scope: { sessionId?: string } = {}): Promise<Blob> {
   const data: Record<string, unknown[]> = {};
-  for (const t of TABLES) data[t] = await db.table(t).toArray();
-  const chunks = await db.audioChunks.toArray();
+  const session = scope.sessionId ? await db.sessions.get(scope.sessionId) : undefined;
+  if (scope.sessionId && !session) throw new Error('Session not found');
+  for (const t of TABLES) {
+    if (!session) data[t] = await db.table(t).toArray();
+    else if (t === 'settings') data[t] = [];
+    else if (t === 'groups') data[t] = (await db.groups.bulkGet([session.groupId])).filter(Boolean);
+    else if (t === 'sessions') data[t] = [session];
+    else if (t === 'segments') {
+      const runIds = await db.runs.where('sessionId').equals(session.id).primaryKeys();
+      data[t] = await db.segments.where('runId').anyOf(runIds).toArray();
+    } else data[t] = await db.table(t).where('sessionId').equals(session.id).toArray();
+  }
+  const recordingIds = session ? (data.recordings as { id: string }[]).map((r) => r.id) : null;
+  const chunks = recordingIds ? await db.audioChunks.where('recordingId').anyOf(recordingIds).toArray() : await db.audioChunks.toArray();
   const files: Record<string, Uint8Array> = {};
   const chunkMeta = [];
   for (const c of chunks) {
@@ -27,11 +45,14 @@ export async function exportLibrary(): Promise<Blob> {
   files['library.json'] = strToU8(
     JSON.stringify({ format: FORMAT, version: VERSION, exportedAt: new Date().toISOString(), tables: data, audioChunks: chunkMeta }),
   );
-  const zipped = await new Promise<Uint8Array>((resolve, reject) =>
+  return zipBlob(files);
+}
+
+export function zipBlob(files: Record<string, Uint8Array>): Promise<Blob> {
+  return new Promise((resolve, reject) =>
     // Audio is already dense; store it without compression to keep export fast.
-    zip(files, { level: 0 }, (err, out) => (err ? reject(err) : resolve(out))),
+    zip(files, { level: 0 }, (err, out) => (err ? reject(err) : resolve(new Blob([out as BlobPart], { type: 'application/zip' })))),
   );
-  return new Blob([zipped as BlobPart], { type: 'application/zip' });
 }
 
 export interface ImportSummary {
