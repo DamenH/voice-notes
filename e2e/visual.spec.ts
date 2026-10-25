@@ -19,6 +19,4 @@ test('screens', async ({ page }, info) => {
     await page.waitForTimeout(300);
     await page.screenshot({ path: `test-results/shots/${n}-settings-${scheme}.png` });
   }
-  const group = await page.evaluate(() => location.hash);
-  void group;
 });
