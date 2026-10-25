@@ -1,1 +1,276 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* Utilities read the design tokens, so light/dark switch in one place. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-hairline: var(--hairline);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-rec: var(--rec);
+  --color-rec-soft: var(--rec-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --font-sans: var(--font);
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  --breakpoint-desk: 900px;
+  --breakpoint-wide: 1280px;
+}
+
+:root {
+  color-scheme: light;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-2: #efeee9;
+  --surface-3: #e5e4de;
+  --border: #d9d7cf;
+  --hairline: rgb(30 30 26 / 0.09);
+  --text: #1d1d1b;
+  --text-muted: #63625c;
+  --text-faint: #8d8b83;
+  --accent: #2b6a5d;
+  --accent-soft: #dceee8;
+  --accent-text: #ffffff;
+  --rec: #d23f3f;
+  --rec-soft: #fbe3e1;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd9;
+  --ok: #2f7d4f;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --sidebar-width: 272px;
+  --rail-width: 64px;
+  --inspector-width: 380px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #151618;
+    --surface: #1e1f22;
+    --surface-2: #26272b;
+    --surface-3: #303136;
+    --border: #3a3b41;
+    --hairline: rgb(236 235 231 / 0.09);
+    --text: #ecebe7;
+    --text-muted: #a9a8a2;
+    --text-faint: #7d7c77;
+    --accent: #6cc3ad;
+    --accent-soft: #1f3a34;
+    --accent-text: #0d1f1b;
+    --rec: #ff6b66;
+    --rec-soft: #3d2120;
+    --warn: #f0b45a;
+    --warn-soft: #3a2c16;
+    --ok: #6fcf97;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #151618;
+  --surface: #1e1f22;
+  --surface-2: #26272b;
+  --surface-3: #303136;
+  --border: #3a3b41;
+  --hairline: rgb(236 235 231 / 0.09);
+  --text: #ecebe7;
+  --text-muted: #a9a8a2;
+  --text-faint: #7d7c77;
+  --accent: #6cc3ad;
+  --accent-soft: #1f3a34;
+  --accent-text: #0d1f1b;
+  --rec: #ff6b66;
+  --rec-soft: #3d2120;
+  --warn: #f0b45a;
+  --warn-soft: #3a2c16;
+  --ok: #6fcf97;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+@media (display-mode: standalone), (display-mode: window-controls-overlay) {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button,
+[role='button'] {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+/* Rendered model output (simple markdown). */
+.prose-note {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.prose-note p,
+.prose-note ul,
+.prose-note ol,
+.prose-note pre,
+.prose-note blockquote {
+  margin: 0 0 0.75em;
+}
+.prose-note > :last-child {
+  margin-bottom: 0;
+}
+.prose-note ul,
+.prose-note ol {
+  padding-left: 1.3em;
+}
+.prose-note ul {
+  list-style: disc;
+}
+.prose-note ol {
+  list-style: decimal;
+}
+.prose-note li {
+  margin: 0.2em 0;
+}
+.prose-note h1,
+.prose-note h2,
+.prose-note h3,
+.prose-note h4 {
+  font-weight: 650;
+  margin: 1em 0 0.4em;
+}
+.prose-note h1 {
+  font-size: 1.15em;
+}
+.prose-note h2 {
+  font-size: 1.08em;
+}
+.prose-note code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+.prose-note pre {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.7em 0.9em;
+  overflow-x: auto;
+}
+.prose-note pre code {
+  background: none;
+  padding: 0;
+}
+.prose-note blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.8em;
+  color: var(--text-muted);
+}
+.prose-note a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@keyframes pulse-rec {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--rec) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--rec) 0%, transparent);
+  }
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.animate-rise {
+  animation: rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.animate-sheet {
+  animation: sheet-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.animate-fade {
+  animation: fade-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Installed desktop app drawing into the title bar: leave a drag strip. */
+.titlebar-drag {
+  display: none;
+}
+@media (display-mode: window-controls-overlay) {
+  .titlebar-drag {
+    display: block;
+    position: fixed;
+    z-index: 50;
+    left: env(titlebar-area-x, 0);
+    top: env(titlebar-area-y, 0);
+    width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 0);
+    -webkit-app-region: drag;
+  }
+  .wco-pad {
+    padding-top: env(titlebar-area-height, 0px);
+  }
+}

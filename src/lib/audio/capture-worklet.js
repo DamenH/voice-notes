@@ -7,9 +7,17 @@ class PcmCapture extends AudioWorkletProcessor {
     this.pos = 0;
     this.acc = 0;
     this.accN = 0;
-    this.batch = new Int16Array(Math.round(this.target / 4));
+    this.size = Math.round(this.target / 4);
+    this.batch = new Int16Array(this.size);
     this.n = 0;
     this.peak = 0;
+    // On stop, send the partial batch so the last fraction of a second is kept.
+    this.port.onmessage = (e) => {
+      if (e.data !== 'flush') return;
+      const rest = this.batch.slice(0, this.n);
+      this.n = 0;
+      this.port.postMessage({ samples: rest, peak: this.peak, flushed: true }, [rest.buffer]);
+    };
   }
 
   process(inputs) {
@@ -30,9 +38,10 @@ class PcmCapture extends AudioWorkletProcessor {
         this.accN = 0;
         this.peak = Math.max(this.peak, Math.abs(v));
         this.batch[this.n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
-        if (this.n === this.batch.length) {
+        if (this.n === this.size) {
+          // Transferring detaches this.batch, so allocate the next one from the stored size.
           this.port.postMessage({ samples: this.batch, peak: this.peak }, [this.batch.buffer]);
-          this.batch = new Int16Array(this.batch.length);
+          this.batch = new Int16Array(this.size);
           this.n = 0;
           this.peak = 0;
         }

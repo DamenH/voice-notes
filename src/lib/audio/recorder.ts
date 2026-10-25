@@ -42,6 +42,7 @@ class Recorder {
   private chunkIndex = 0;
   private wakeLock: WakeLockSentinel | null = null;
   private flushing: Promise<void> = Promise.resolve();
+  private onFlushed: (() => void) | null = null;
 
   get snapshot() {
     return this.snap;
@@ -76,7 +77,10 @@ class Recorder {
     await this.ctx.audioWorklet.addModule(workletUrl);
     const source = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, 'pcm-capture', { processorOptions: { targetRate: SAMPLE_RATE } });
-    this.node.port.onmessage = (e: MessageEvent<{ samples: Int16Array; peak: number }>) => this.onSamples(e.data);
+    this.node.port.onmessage = (e: MessageEvent<{ samples: Int16Array; peak: number; flushed?: boolean }>) => {
+      this.onSamples(e.data);
+      if (e.data.flushed) this.onFlushed?.();
+    };
     source.connect(this.node);
     // Some browsers only pull audio through nodes connected to the destination; keep it silent.
     const mute = this.ctx.createGain();
@@ -177,6 +181,18 @@ class Recorder {
   async stop(): Promise<{ entryId: string; recordingId: string; sessionId: string } | null> {
     const { state, recordingId, entryId, sessionId } = this.snap;
     if (state !== 'recording' && state !== 'paused') return null;
+    // Collect the worklet's partial batch (accepted even while paused is ending).
+    if (state === 'recording' && this.node) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 300);
+        this.onFlushed = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        this.node!.port.postMessage('flush');
+      });
+      this.onFlushed = null;
+    }
     this.set({ state: 'stopping' });
     await this.queueFlush();
     await this.flushing;

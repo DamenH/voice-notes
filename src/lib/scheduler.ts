@@ -4,7 +4,7 @@ import { createEntry } from './library';
 import { OpenRouterError, friendlyError } from './openrouter/client';
 import { executeProcessRun, RunPaused } from './processing';
 import { executeInferRun } from './inference';
-import { onSchedulerSignal } from './scheduler-signal';
+import { onSchedulerSignal, setAbortHandler } from './scheduler-signal';
 import type { Run } from './types';
 
 const MAX_CONCURRENT = 2;
@@ -47,6 +47,7 @@ export async function recoverRuns() {
 export function startScheduler() {
   if (started) return;
   started = true;
+  setAbortHandler(abortRun);
   onSchedulerSignal(() => void tick());
   window.addEventListener('online', () => void resumeWaiting());
   void recoverRuns().then(() => (navigator.onLine ? resumeWaiting() : tick()));

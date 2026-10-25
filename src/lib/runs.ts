@@ -10,7 +10,7 @@ import {
 } from './openrouter/catalog';
 import type { Entry, Group, Id, InferencePreset, PipelineConfig, ProcessStep, Run, Session, Settings, SourceRef } from './types';
 import type { AudioRequest } from './tools';
-import { notifyScheduler } from './scheduler-signal';
+import { notifyScheduler, requestAbort } from './scheduler-signal';
 
 interface Context {
   settings: Settings;
@@ -302,8 +302,7 @@ async function unblockDependents(runId: Id) {
 }
 
 export async function cancelRun(runId: Id) {
-  const { abortRun } = await import('./scheduler');
-  abortRun(runId);
+  requestAbort(runId);
   await db.transaction('rw', db.runs, async () => {
     const cancel = async (id: Id) => {
       const r = await db.runs.get(id);
