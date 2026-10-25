@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
-import { defaultSettings } from './defaults';
+import { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, defaultSettings } from './defaults';
+import { OLD_LANGUAGE_PRACTICE_V1, OLD_PROCESSING_INSTRUCTIONS_V1 } from './migrations';
 import type {
   AudioChunk,
   Entry,
@@ -39,6 +40,26 @@ export class VoiceNotesDB extends Dexie {
       searchRecords: 'id, groupId, sessionId, entryId',
       ttsCache: 'id, entryId, key',
       settings: 'id',
+    });
+    // v2: shorter default audio-processing instructions. Replace the old defaults wherever
+    // they were saved unchanged; customised text is left alone.
+    this.version(2).upgrade(async (tx) => {
+      const swap = (text: unknown) =>
+        text === OLD_PROCESSING_INSTRUCTIONS_V1 ? DEFAULT_PROCESSING_INSTRUCTIONS : text === OLD_LANGUAGE_PRACTICE_V1 ? LANGUAGE_PRACTICE_PROCESSING : text;
+      const fixPipeline = (p: { process?: { instructions?: string } } | null | undefined) => {
+        if (p?.process) p.process.instructions = swap(p.process.instructions) as string;
+      };
+      await tx.table('settings').toCollection().modify((s: Settings) => {
+        s.instructions.processing = swap(s.instructions.processing) as string;
+        fixPipeline(s.pipeline);
+        s.pipelinePresets?.forEach((p) => fixPipeline(p.config));
+      });
+      for (const t of ['groups', 'sessions']) {
+        await tx.table(t).toCollection().modify((row: Group | Session) => {
+          fixPipeline(row.pipeline);
+          if (row.instructions?.processing) row.instructions.processing = swap(row.instructions.processing) as string;
+        });
+      }
     });
   }
 }

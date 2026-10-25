@@ -141,7 +141,10 @@ export async function executeInferRun(run: Run, settings: Settings, signal: Abor
 
   // Long material for a transformation preset (cleanup) is processed in order, chunk by chunk.
   if (preset?.chunked) {
-    const sources = await sourceEntries(run);
+    // A transformation like cleanup works on the transcript only, not on audio notes.
+    const all = await sourceEntries(run);
+    const transcripts = all.filter((e) => e.kind === 'transcript');
+    const sources = transcripts.length ? transcripts : all;
     const material = sources.map((s) => s.text).join('\n\n');
     const chunks = splitForChunks(material);
     const out = await outputEntry(run, title);

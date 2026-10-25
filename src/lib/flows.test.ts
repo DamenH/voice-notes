@@ -376,3 +376,47 @@ describe('long recordings', () => {
     expect(run.usage.cost).toBeCloseTo(0.003);
   }, 60000);
 });
+
+describe('fixes from review', () => {
+  it('cleanup uses only the transcript, not audio notes', async () => {
+    const calls = mockOpenRouter((path, body) => {
+      if (path === 'audio/transcriptions') return json(WHISPER_RESPONSE);
+      if (body.model === 'thinkingmachines/inkling') return textStream('- Hesitation before "bike lanes"');
+      return textStream('Cleaned.');
+    });
+    const { entry } = await seedRecording();
+    await processRecording(entry.id, { ...PIPELINE_PRESETS[1].config, infer: { preset: 'cleanup', instructions: '' } });
+    await settled(entry.turnId);
+    const cleanupCall = calls.find((c) => c.path === 'chat/completions' && c.body.model === 'anthropic/claude-haiku-5.5')!;
+    const sent = JSON.stringify(cleanupCall.body.messages);
+    expect(sent).toContain('bike lanes. Actually');
+    expect(sent).not.toContain('Hesitation before');
+    // Inkling was told not to repeat the transcript it was given.
+    const inkling = calls.find((c) => c.body.model === 'thinkingmachines/inkling')!;
+    expect(JSON.stringify(inkling.body.messages)).toContain('Do not repeat the transcript');
+  });
+
+  it('migrates saved old default instructions to the shorter ones, keeping custom text', async () => {
+    const { default: Dexie } = await import('dexie');
+    const { OLD_PROCESSING_INSTRUCTIONS_V1, OLD_LANGUAGE_PRACTICE_V1 } = await import('./migrations');
+    const { DEFAULT_PROCESSING_INSTRUCTIONS, LANGUAGE_PRACTICE_PROCESSING, defaultSettings } = await import('./defaults');
+    const { VoiceNotesDB } = await import('./db');
+    const name = `migrate-${Math.random()}`;
+    const v1 = new Dexie(name);
+    v1.version(1).stores({ groups: 'id', sessions: 'id', settings: 'id' });
+    const s = defaultSettings();
+    s.instructions.processing = OLD_PROCESSING_INSTRUCTIONS_V1;
+    s.pipelinePresets[1].config.process.instructions = OLD_LANGUAGE_PRACTICE_V1;
+    await v1.table('settings').put(s);
+    await v1.table('sessions').put({ id: 's1', instructions: { processing: 'My own words.' }, pipeline: { process: { instructions: OLD_LANGUAGE_PRACTICE_V1 } } });
+    v1.close();
+    const v2 = new VoiceNotesDB(name);
+    const migrated = (await v2.settings.get('global'))!;
+    expect(migrated.instructions.processing).toBe(DEFAULT_PROCESSING_INSTRUCTIONS);
+    expect(migrated.pipelinePresets[1].config.process.instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
+    const session = (await v2.sessions.get('s1'))!;
+    expect(session.instructions.processing).toBe('My own words.');
+    expect(session.pipeline!.process.instructions).toBe(LANGUAGE_PRACTICE_PROCESSING);
+    v2.close();
+  });
+});

@@ -109,6 +109,21 @@ Bugs found and fixed while building:
   with a stale copy. Pipeline edits now read-modify-write against IndexedDB.
   Found by the live test.
 
+## Inkling verbosity (2026-10-25)
+
+The first default instructions asked for observations, interpretations and
+uncertainty on every recording. Inkling followed them literally and wrote a
+paragraph of each even for "Test 123". The new defaults ask for only notable
+points, a few bullets at most, and one line when nothing stands out, and they forbid
+describing the voice or guessing the purpose of the recording. When Inkling is given
+a transcript it is told not to repeat it. On the English fixture this gave three
+bullets (249 output tokens, $0.0016), and Inkling caught an "of… of" stumble that
+Whisper's transcript had smoothed over. Saved copies of the old defaults are
+migrated (database v2); customised text is left alone.
+
+Cleanup now uses only transcripts as input. Before, it also received Inkling's
+notes and merged them into the "cleaned transcript".
+
 ## Android recording behaviour (expected; verify on a device)
 
 - A screen wake lock is held while recording, so the screen doesn't sleep while
