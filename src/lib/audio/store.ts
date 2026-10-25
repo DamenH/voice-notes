@@ -45,8 +45,22 @@ export async function recordingWav(recordingId: string): Promise<Blob> {
   );
 }
 
-export function energyReader(recordingId: string) {
-  return async (time: number, window: number) => rms(await readPcm(recordingId, Math.max(0, time), time + window));
+/**
+ * Energy of short windows, for finding quiet cut points. Reads a 40 s block at a time and
+ * scans it in memory, so a cut search costs one database read instead of hundreds.
+ */
+export function energyReader(recordingId: string, blockSeconds = 40) {
+  let block: { start: number; end: number; samples: Int16Array; rate: number } | null = null;
+  return async (time: number, window: number) => {
+    const t = Math.max(0, time);
+    if (!block || t < block.start || t + window > block.end) {
+      const rec = await db.recordings.get(recordingId);
+      const rate = rec?.sampleRate ?? SAMPLE_RATE;
+      block = { start: t, end: t + blockSeconds, samples: await readPcm(recordingId, t, t + blockSeconds), rate };
+    }
+    const from = Math.round((t - block.start) * block.rate);
+    return rms(block.samples.subarray(from, from + Math.round(window * block.rate)));
+  };
 }
 
 /** Store PCM (e.g. an imported file) as a complete recording's chunks. */

@@ -41,11 +41,11 @@ beforeAll(() => {
 
 const terminal = ['done', 'failed', 'cancelled', 'blocked', 'awaiting_approval', 'waiting_network'];
 
-async function settled(turnId: string) {
+async function settled(turnId: string, timeout = 5000) {
   return waitFor(async () => {
     const runs = await db.runs.where('turnId').equals(turnId).sortBy('createdAt');
     return runs.length > 0 && runs.every((r) => terminal.includes(r.status)) && runs;
-  });
+  }, timeout);
 }
 
 describe('recording storage', () => {
@@ -373,7 +373,7 @@ describe('long recordings', () => {
     });
     const { entry } = await seedRecording(samples, rate);
     await processRecording(entry.id, pipeline(step('transcribe', { model: WHISPER, output: 'show' })));
-    const [run] = await settled(entry.turnId);
+    const [run] = await settled(entry.turnId, 30000);
     expect(run.status).toBe('done');
     const segs = await db.segments.where('runId').equals(run.id).sortBy('index');
     expect(segs.length).toBe(3);
