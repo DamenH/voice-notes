@@ -1,32 +1,45 @@
-# React + TypeScript + Vite
+# Voice Notes
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Think aloud, study, and practise languages with your voice. Record, and when you
+press stop the session's pipeline runs automatically: by default it transcribes
+the recording and cleans up the transcript. Switch a session to **Inkling** to have
+an audio-aware model actually *hear* pronunciation, pauses and hesitation, ask for
+help from a Little or Big model that can search your other sessions, and have
+responses read aloud with ElevenLabs voices.
 
-Currently, two official plugins are available:
+**App:** https://damenh.github.io/voice-notes/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Installable PWA for Android and desktop; recording, playback and browsing work offline.
+- Everything is stored on your device (IndexedDB). Export/import a zip backup in Settings.
+- Model calls go directly from your browser to [OpenRouter](https://openrouter.ai)
+  using your own account (OAuth PKCE, or paste an API key).
 
-## React Compiler
+## How it works
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Step | Default | Options |
+| --- | --- | --- |
+| Record | 16 kHz mono PCM, saved every 5 s | pause/resume, wake lock |
+| Process | Whisper large v3 turbo (timestamps) | Inkling (audio-aware), both combined, other STT models |
+| Infer | Clean up with Little (Claude Haiku 5.5) | Summarise, Language feedback, Think it through, custom presets, Big (Claude Sonnet 5.5) |
+| Speak | — | ElevenLabs via OpenRouter, cached locally |
 
-## Expanding the Oxlint configuration
+Pipelines inherit default → group → session and are edited inline from the control
+next to the record button. Instructions inherit the same way, plus per-run
+instructions; each run stores the exact instructions it used. Processing details
+and tool calls are collapsed into one summary line per turn unless you expand them.
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Development
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+npm run dev          # http://localhost:5173
+npm run verify       # typecheck, lint, unit tests, build, secret scan
+npm run test:e2e     # Playwright (fake microphone, mocked OpenRouter)
+npm run test:live    # real OpenRouter calls; key from ~/dev-key.txt or OPENROUTER_API_KEY (costs a few cents)
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+- `PLAN.md` — the product and implementation plan.
+- `docs/FINDINGS.md` — provider behaviour, measurements and design decisions.
+- `docs/MANUAL-CHECKS.md` — checks that need a real phone or a human sign-in.
+
+Pushing to `main` deploys to GitHub Pages.

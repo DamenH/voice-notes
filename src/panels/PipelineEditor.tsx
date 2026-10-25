@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { db, updateSettings } from '../lib/db';
+import { db, getSettings, updateSettings } from '../lib/db';
 import { newId, now } from '../lib/ids';
 import { pipelineSource, resolvePipeline } from '../lib/instructions';
 import { pipelineCostPerMinute } from '../lib/pipelineInfo';
@@ -28,12 +28,20 @@ export function PipelineEditor({ settings, group, session, initialScope }: { set
     else if (scope === 'group' && group) await db.groups.update(group.id, { pipeline: next, updatedAt: now() });
     else await updateSettings({ pipeline: next });
   };
+  // Edits are read-modify-write against the database, so quick successive changes never use a stale copy.
+  const edit = async (change: (c: PipelineConfig) => PipelineConfig) => {
+    const s2 = await getSettings();
+    const g = group ? await db.groups.get(group.id) : undefined;
+    const ses = session ? await db.sessions.get(session.id) : undefined;
+    const fresh = scope === 'session' ? resolvePipeline(s2, g, ses) : scope === 'group' ? (g?.pipeline ?? s2.pipeline) : s2.pipeline;
+    await save(change(fresh));
+  };
   const reset = async () => {
     if (scope === 'session' && session) await db.sessions.update(session.id, { pipeline: null });
     if (scope === 'group' && group) await db.groups.update(group.id, { pipeline: null });
   };
-  const setProcess = (patch: Partial<PipelineConfig['process']>) => void save({ ...config, process: { ...config.process, ...patch } });
-  const setInfer = (patch: Partial<PipelineConfig['infer']>) => void save({ ...config, infer: { ...config.infer, ...patch } });
+  const setProcess = (patch: Partial<PipelineConfig['process']>) => void edit((c) => ({ ...c, process: { ...c.process, ...patch } }));
+  const setInfer = (patch: Partial<PipelineConfig['infer']>) => void edit((c) => ({ ...c, infer: { ...c.infer, ...patch } }));
   const { perMinute, unknown } = pipelineCostPerMinute(config, settings);
   const preset = settings.inferencePresets.find((p) => p.id === config.infer.preset);
   const matching = settings.pipelinePresets.find((p) => JSON.stringify(p.config) === JSON.stringify(config));

@@ -84,8 +84,46 @@ wait. It's more that…"):
 - **Binary storage:** IndexedDB blobs via Dexie. OPFS isn't needed at these
   chunk sizes.
 
+## Live end-to-end results (2026-10-25)
+
+`npm run test:live` drives the built app in Chromium with the speech fixtures
+as a fake microphone and the real OpenRouter API:
+
+- Default pipeline on the 18 s English clip: Whisper turbo → Haiku 5.5 cleanup,
+  self-correction preserved, $0.00015 total.
+- Big chat (Sonnet 5.5) asked about "safety evidence": it called `search_group`,
+  found the line in the session and cited the entry id and time. $0.011.
+- Read aloud via `elevenlabs/eleven-flash-v2.5`: speech requested once, then
+  replayed from the local cache with no further request.
+- Language practice on the 8 s Spanish clip (Whisper + Inkling + Sonnet tutor):
+  Inkling's notes included the "eh" hesitation; tutor feedback was accurate.
+  $0.021 total (Inkling $0.006, which includes its reasoning tokens).
+- Estimates under-predict very short clips, because fixed per-request overhead
+  (instructions, reasoning) dominates. They are reasonable per minute of longer audio.
+
+Bugs found and fixed while building:
+- The capture worklet transferred its sample buffer, which detached it, and then
+  sized the next buffer from the detached (zero-length) array. Only the first
+  0.25 s batch was ever sent. Found by the fake-microphone e2e test.
+- Picking a pipeline preset and then quickly editing a field overwrote the preset
+  with a stale copy. Pipeline edits now read-modify-write against IndexedDB.
+  Found by the live test.
+
+## Android recording behaviour (expected; verify on a device)
+
+- A screen wake lock is held while recording, so the screen doesn't sleep while
+  the app is in front. It is re-acquired when the page becomes visible again.
+- When the user locks the screen or switches apps, Chrome on Android generally
+  keeps an active `getUserMedia` capture running, but this varies by device and
+  power settings. If the AudioContext is suspended the app shows a warning and
+  tries to resume. Audio is saved every 5 s, and on reopen an unfinished
+  recording is marked "Interrupted — saved up to here" and stays playable.
+- See `docs/MANUAL-CHECKS.md` for the device checks.
+
 ## Spend log
 
 | When | What | Spend |
 | --- | --- | --- |
 | 2026-10-25 | Fixtures (TTS), transcription, Inkling, cleanup probes | < $0.01 |
+| 2026-10-25 | Live smoke runs (3, including one failed and re-run) | ≈ $0.05 |
+| | **Total on the dev key** | **≈ $0.05 of the $5 cap** |

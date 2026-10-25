@@ -343,3 +343,36 @@ describe('export and import', () => {
 });
 
 vi.setConfig({ testTimeout: 15000 });
+
+describe('long recordings', () => {
+  it('process in bounded segments cut at pauses, with global timestamps', async () => {
+    // 11 minutes of "speech" (noise) with a short silence near every 5-minute mark.
+    const rate = 16000;
+    const samples = new Int16Array(rate * 660);
+    for (let i = 0; i < samples.length; i++) samples[i] = ((i * 7919) % 2000) - 1000;
+    for (const quiet of [296, 607]) samples.fill(0, quiet * rate, (quiet + 1) * rate);
+    const sizes: number[] = [];
+    mockOpenRouter((path, body) => {
+      if (path === 'audio/transcriptions') {
+        const bytes = atob((body.input_audio as { data: string }).data).length;
+        sizes.push(bytes);
+        return json({ text: `part ${sizes.length}`, segments: [{ start: 1, end: 2, text: `part ${sizes.length}` }], usage: { cost: 0.001 } });
+      }
+      return textStream('ok');
+    });
+    const { entry } = await seedRecording(samples, rate);
+    await processRecording(entry.id, { ...DEFAULT_PIPELINE, infer: { preset: 'off', instructions: '' } });
+    const [run] = await settled(entry.turnId);
+    expect(run.status).toBe('done');
+    const segs = await db.segments.where('runId').equals(run.id).sortBy('index');
+    expect(segs.length).toBe(3);
+    expect(segs[0].end).toBeGreaterThan(296);
+    expect(segs[0].end).toBeLessThan(297.2);
+    expect(segs[1].end).toBeGreaterThan(607);
+    // Each request is at most ~5.25 minutes of 16 kHz mono WAV (~10 MB), well under limits.
+    expect(Math.max(...sizes)).toBeLessThan(16000 * 2 * 320);
+    const transcript = (await db.entries.where('turnId').equals(entry.turnId).toArray()).find((e) => e.kind === 'transcript')!;
+    expect(transcript.timestamps!.map((t) => Math.round(t.start))).toEqual([1, Math.round(segs[1].start + 1), Math.round(segs[2].start + 1)]);
+    expect(run.usage.cost).toBeCloseTo(0.003);
+  }, 60000);
+});
